@@ -53,7 +53,7 @@ Your manual won’t tell you this, but you’ll need the vendor apps to set inst
 ### Option A — HACS (recommended)
 
 1. In Home Assistant, install **HACS** if you haven’t already.
-2. HACS → Integrations → **Custom repositories** → Add your repo URL (type: *Integration*).
+2. HACS → Integrations → **Custom repositories** → Add this repo URL (type: *Integration*).
 3. Search **Zeekr Charger** in HACS and install.
 4. **Restart Home Assistant**.
 
