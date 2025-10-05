@@ -1,7 +1,7 @@
 {
   "domain": "zeekr_charger",
   "name": "Zeekr Charger",
-  "codeowners": ["@wattsg"],
+  "codeowners": ["@geoffwatts"],
   "version": "0.0.1",
   "documentation": "https://github.com/wattsg/zeekr_charger",
   "integration_type": "device",
