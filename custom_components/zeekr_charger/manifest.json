@@ -1,0 +1,12 @@
+{
+  "domain": "zeekr_charger",
+  "name": "Zeekr Charger",
+  "codeowners": ["@wattsg"],
+  "version": "0.0.1",
+  "documentation": "https://github.com/wattsg/zeekr_charger",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "loggers": ["custom_components.zeekr_charger"],
+  "requirements": ["bleak>=0.21.0", "bleak-retry-connector>=1.0.0", "pycryptodome>=3.19.0"],
+  "config_flow": true
+}

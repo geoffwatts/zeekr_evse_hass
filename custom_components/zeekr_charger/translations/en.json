@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zeekr Charger Setup",
+        "description": "Add your Zeekr charger to Home Assistant",
+        "data": {
+          "serial": "Serial Number",
+          "device_address": "Device BLE MAC Address (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to charger",
+      "invalid_auth": "Authentication failed",
+      "unknown": "Unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "This charger is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Zeekr Charger Options",
+        "data": {
+          "device_address": "Device Address"
+        }
+      }
+    }
+  }
+}
+
