@@ -303,37 +303,46 @@ class ZeekrBleClient:
     async def _reconnection_loop(self) -> None:
         """Handle reconnection with exponential backoff."""
         _LOGGER.info("Starting reconnection loop")
-        
-        while self._should_reconnect and self._reconnect_attempts < self._max_reconnect_attempts:
+
+        while self._should_reconnect:
             try:
                 self._reconnect_attempts += 1
-                current_delay = min(self._reconnect_delay * (2 ** (self._reconnect_attempts - 1)), self._max_reconnect_delay)
-                
-                log_connection(f"Retrying connection (attempt {self._reconnect_attempts}/{self._max_reconnect_attempts}) in {current_delay:.1f}s")
-                
-                # Wait before attempting reconnection
+                current_delay = min(
+                    self._reconnect_delay * (2 ** (self._reconnect_attempts - 1)),
+                    self._max_reconnect_delay,
+                )
+
+                if self._reconnect_attempts <= self._max_reconnect_attempts:
+                    log_connection(
+                        f"Retrying connection (attempt {self._reconnect_attempts}/{self._max_reconnect_attempts}) in {current_delay:.1f}s"
+                    )
+                else:
+                    # After max attempts switch to fixed interval retries every 5 minutes
+                    current_delay = max(current_delay, 300)
+                    log_connection(
+                        f"Max attempts reached; continuing retries every {current_delay:.0f}s"
+                    )
+
                 await asyncio.sleep(current_delay)
-                
+
                 if not self._should_reconnect:
                     break
-                
-                # Attempt to reconnect
+
                 if await self._attempt_reconnection():
-                    log_connection(f"Reconnection successful after {self._reconnect_attempts} attempts")
-                    self._reconnect_attempts = 0  # Reset counter on success
+                    log_connection(
+                        f"Reconnection successful after {self._reconnect_attempts} attempts"
+                    )
+                    self._reconnect_attempts = 0
                     return
-                else:
-                    _LOGGER.warning("Reconnection attempt %d failed", self._reconnect_attempts)
-                    
+                _LOGGER.warning("Reconnection attempt %d failed", self._reconnect_attempts)
+
             except asyncio.CancelledError:
                 _LOGGER.info("Reconnection cancelled")
                 break
             except Exception as exc:
                 _LOGGER.error("Reconnection error: %s", exc)
-        
-        if self._reconnect_attempts >= self._max_reconnect_attempts:
-            _LOGGER.error("Max reconnection attempts reached (%d), giving up", self._max_reconnect_attempts)
-        else:
+
+        if not self._should_reconnect:
             _LOGGER.info("Reconnection stopped (should_reconnect=False)")
 
     async def _attempt_reconnection(self) -> bool:
@@ -524,6 +533,7 @@ class ZeekrBleClient:
                 # The tail byte is frame-level metadata (ack/status), not part of heartbeat payload
                 self._last_heartbeat_state = parse_heartbeat_state(pf.payload, self._last_heartbeat_time)
                 self._last_heartbeat_time = self._last_heartbeat_state.timestamp
+                heartbeat_temperature = self._last_heartbeat_state.temperature_c
                 
                 
                 # Track charging session state changes
@@ -545,12 +555,17 @@ class ZeekrBleClient:
                 if len(pf.payload) == 21:
                     telemetry = parse_b5_telemetry(pf.payload)
                     if telemetry:
+                        if heartbeat_temperature is not None and telemetry.temperature_c is None:
+                            telemetry.temperature_c = heartbeat_temperature
                         self._last_telemetry = telemetry
                         if self._last_heartbeat_state.charging and self._session_energy_offset_kwh is None:
                             self._session_energy_offset_kwh = telemetry.session_energy_kwh
-                        _LOGGER.debug("Telemetry received: session=%.2f kWh, lifetime=%.2f kWh, voltage=%.1f V, current=%.1f A", 
-                                    telemetry.session_energy_kwh, telemetry.lifetime_energy_kwh, 
-                                    telemetry.voltage_v, telemetry.current_a)
+                        _LOGGER.debug(
+                            "Telemetry received: session=%.2f kWh, voltage=%.1f V, current=%.1f A",
+                            telemetry.session_energy_kwh,
+                            telemetry.voltage_v,
+                            telemetry.current_a,
+                        )
                 
                 if VERBOSE_LOGGING:
                     _LOGGER.debug("Received heartbeat response, state: %s", self._last_heartbeat_state)
@@ -1191,8 +1206,6 @@ class ZeekrBleClient:
                 
                 # Parse 0xE4 response like the dumper does
                 # Structure: [response_type][format][ssid_data][newline][password_data]
-                # Example: C0 02 68 61 0A 77 75 74 61 6E 67 6C 61 6E
-                #          C0=response_type, 02=format, 68 61="ha", 0A=newline, 77 75...="wutanglan"
                 result = {}
                 if len(full_response) >= 2:
                     result["wifi_flag_hex"] = full_response[:2].hex()

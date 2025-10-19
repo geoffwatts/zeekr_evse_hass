@@ -151,7 +151,6 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "current_a": round(telemetry.current_a, 1),
                     "session_energy_kwh": round(session_energy, 4),
                     "session_energy_kwh_raw": round(telemetry.session_energy_kwh, 4),
-                    "lifetime_energy_kwh": round(telemetry.lifetime_energy_kwh, 4),
                     "session_runtime_seconds": telemetry.session_runtime_seconds,
                 }
                 # Prefer the runtime derived from the BLE session tracker when available

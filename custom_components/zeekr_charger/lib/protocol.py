@@ -97,6 +97,7 @@ class HeartbeatState:
     timestamp: float = 0.0  # Unix timestamp when heartbeat was received
     seconds_ago: float = 0.0  # Seconds since last heartbeat
     telemetry: Optional[B5Telemetry] = None  # Detailed telemetry data for 21-byte payloads
+    temperature_c: Optional[int] = None  # Charger temperature when present
 
 
 @dataclass
@@ -122,9 +123,9 @@ class CurrentConfig:
 
 @dataclass
 class B5Telemetry:
-    """Full 21-byte heartbeat telemetry during active charging.
+    """Full heartbeat telemetry during active charging.
 
-    Empirically confirmed layout on current Zeekr firmware:
+    Empirically confirmed layout on current Zeekr firmware (single and multi-phase):
     - Byte 0: state (0x06 = charging)
     - Byte 1: port hint (often zero; port index is repeated at byte 19)
     - Bytes 2-5: session sequence number (little-endian)
@@ -132,11 +133,14 @@ class B5Telemetry:
     - Bytes 8-9: line voltage (little-endian centivolts)
     - Bytes 10-11: reserved (observed as 0 on single-phase units)
     - Byte 12: charge current (deci-amps)
-    - Bytes 13-15: session energy (little-endian; legacy firmware uses 2 bytes at
-      0.01 kWh, newer builds extend to 3 bytes at 1/512 Wh)
-    - Bytes 15-18: session runtime (big-endian seconds)
-    - Byte 19: port index (1 = socket A)
+    - Bytes 13-14: session energy (little-endian; some firmwares append a third
+      byte which we interpret using the extended-energy logic)
+    - Bytes 15-16: session runtime (big-endian seconds)
+    - Byte 18: state repeat / status echo
+    - Byte 19: port index (when in range) and, on single-phase units, the
+      internal temperature in °C
     - Byte 20: checksum / rolling counter
+    - Byte 31 (when present): internal temperature for multi-phase payloads
     """
     state: int
     port: int
@@ -150,7 +154,7 @@ class B5Telemetry:
     port_hint: int = 0  # Raw byte 1 value for reference/debugging
     checksum: int = 0  # Trailer byte captured from payload
     session_energy_kwh_exact: float = 0.0
-    lifetime_energy_kwh_exact: float = 0.0
+    temperature_c: Optional[int] = None  # Charger temperature derived from heartbeat
 
     @property
     def voltage_v(self) -> float:
@@ -165,12 +169,6 @@ class B5Telemetry:
         if self.session_energy_kwh_exact:
             return self.session_energy_kwh_exact
         return self.charge_electricity_centikwh / 100.0
-
-    @property
-    def lifetime_energy_kwh(self) -> float:
-        if self.lifetime_energy_kwh_exact:
-            return self.lifetime_energy_kwh_exact
-        return self.session_energy_kwh
 
     @property
     def session_runtime_seconds(self) -> int:
@@ -413,11 +411,8 @@ def cmd_get_ble_info(token: bytes) -> bytes:
 
 # ============== Response Parsers ==============
 def parse_b5_telemetry(payload: bytes) -> Optional[B5Telemetry]:
-    """Parse 21-byte B5 telemetry payload with empirically determined structure.
-    
-    Updated mapping matches currently observed firmware framing (see B5Telemetry).
-    """
-    if len(payload) != 21:
+    """Parse B5 telemetry payload with empirically determined structure."""
+    if len(payload) < 21:
         return None
     
     try:
@@ -440,28 +435,31 @@ def parse_b5_telemetry(payload: bytes) -> Optional[B5Telemetry]:
         else:
             charge_current_centi_a = payload[12] * 10
 
-        # Session energy: legacy firmware reports 0.01 kWh in bytes 13-14; newer
-        # builds extend this to 3 bytes at 1/512 Wh resolution. Prefer the newer
-        # scaling whenever the third byte is significant or the legacy value is
-        # clearly out of range.
-        legacy_energy_counts = int.from_bytes(payload[13:15], "little")
-        extended_energy_counts = int.from_bytes(payload[13:16], "little")
+        # Session energy: 2 bytes at bytes 14-15, in centi-kWh units (0.01 kWh)
+        # This matches the Android app parsing and working Python implementation
+        session_energy_centikwh = int.from_bytes(payload[14:16], "little")
+        energy_kwh = session_energy_centikwh / 100.0
+        charge_electricity_centikwh = session_energy_centikwh
 
-        legacy_energy_kwh = legacy_energy_counts / 10000.0
-        extended_energy_kwh = extended_energy_counts / 512000.0
-
-        if payload[15] > 0x03 or (legacy_energy_kwh - extended_energy_kwh) > 0.25:
-            energy_kwh = extended_energy_kwh
-        else:
-            energy_kwh = legacy_energy_kwh
-
-        charge_electricity_centikwh = int(round(energy_kwh * 100))
-
-        # Session runtime appears as big-endian seconds in bytes 15-16
+        # Session runtime appears as big-endian seconds (two-byte counter)
         charge_duration_seconds = (payload[15] << 8) | payload[16]
 
         state_repeat = payload[18]
-        port = payload[19] if payload[19] != 0 else port_hint
+
+        temperature_c: Optional[int] = None
+        port = port_hint
+
+        if len(payload) > 19:
+            port_candidate = payload[19]
+            if phase_flags == 0:
+                temperature_c = port_candidate
+            # Use candidate as port when it is within sensible range (1..2)
+            if 0 < port_candidate <= 2:
+                port = port_candidate
+
+        if phase_flags != 0 and len(payload) > 31:
+            temperature_c = payload[31]
+
         checksum = payload[20]
 
         return B5Telemetry(
@@ -477,7 +475,7 @@ def parse_b5_telemetry(payload: bytes) -> Optional[B5Telemetry]:
             port_hint=port_hint,
             checksum=checksum,
             session_energy_kwh_exact=energy_kwh,
-            lifetime_energy_kwh_exact=energy_kwh,
+            temperature_c=temperature_c,
         )
     except Exception as e:
         return None
@@ -557,9 +555,10 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
             state_info.car_connected = True
             state_info.charging = telemetry.state == 0x06
             state_info.state = "charging" if telemetry.state == 0x06 else f"state_{telemetry.state:02X}"
-            
+
             # Store telemetry data for detailed charging information
             state_info.telemetry = telemetry
+            state_info.temperature_c = telemetry.temperature_c
             # Telemetry data parsed
         else:
             # Fallback to basic parsing if telemetry parsing fails
@@ -582,7 +581,7 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
     else:
         state_info.state = f"unknown_len_{len(payload)}"
         # Unknown heartbeat pattern - log for analysis
-        
+
         # Try to extract basic state info from first byte if possible
         if len(payload) >= 1:
             state = payload[0]
@@ -594,10 +593,16 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
                 state_info.state = f"unknown_{state_mapping.state}_{state:02X}"
             else:
                 state_info.state = f"unknown_{state:02X}"
-        
+
         if len(payload) >= 2:
             state_info.port = payload[1]
-    
+
+    if state_info.temperature_c is None:
+        if len(payload) > 31:
+            state_info.temperature_c = payload[31]
+        elif len(payload) > 19:
+            state_info.temperature_c = payload[19]
+
     return state_info
 
 

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfElectricCurrent
+from homeassistant.const import UnitOfElectricCurrent, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -44,9 +44,9 @@ async def async_setup_entry(
         # Network sensors
         # Energy sensors
         ZeekrChargerSessionEnergySensor(coordinator),
-        ZeekrChargerLifetimeEnergySensor(coordinator),
         ZeekrChargerVoltageSensor(coordinator),
         ZeekrChargerCurrentSensor(coordinator),
+        ZeekrChargerTemperatureSensor(coordinator),
         ZeekrChargerSessionRuntimeSensor(coordinator),
         ZeekrChargerPhaseStatusSensor(coordinator),
         ZeekrChargerGridCapacitySensor(coordinator),
@@ -437,25 +437,6 @@ class ZeekrChargerSessionEnergySensor(ZeekrChargerSensor):
         return None
 
 
-class ZeekrChargerLifetimeEnergySensor(ZeekrChargerSensor):
-    """Sensor for total lifetime energy consumption."""
-
-    _attr_name = "Lifetime Energy"
-    _attr_native_unit_of_measurement = "kWh"
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_icon = "mdi:counter"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the lifetime energy in kWh."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        lifetime_energy = telemetry.get("lifetime_energy_kwh")
-        if lifetime_energy is not None:
-            return float(lifetime_energy)
-        return None
-
-
 class ZeekrChargerVoltageSensor(ZeekrChargerSensor):
     """Sensor for line voltage."""
 
@@ -491,6 +472,29 @@ class ZeekrChargerCurrentSensor(ZeekrChargerSensor):
         if current is not None:
             return float(current)
         return None
+
+
+class ZeekrChargerTemperatureSensor(ZeekrChargerSensor):
+    """Sensor for charger temperature from heartbeat telemetry."""
+
+    _attr_name = "Charger Temperature"
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_icon = "mdi:thermometer"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the internal charger temperature in Celsius."""
+        heartbeat_state = self.coordinator.data.get("heartbeat_state", {})
+        telemetry = self.coordinator.data.get("telemetry", {})
+
+        temp = heartbeat_state.get("temperature_c")
+        if temp is None:
+            temp = telemetry.get("temperature_c")
+
+        return float(temp) if temp is not None else None
 
 
 class ZeekrChargerSessionRuntimeSensor(ZeekrChargerSensor):
@@ -659,5 +663,3 @@ class ZeekrChargerChargeModeSensor(ZeekrChargerSensor):
             "is_auto_mode": charge_mode == 0x00,
             "is_authorized_mode": charge_mode == 0x01,
         }
-
-
