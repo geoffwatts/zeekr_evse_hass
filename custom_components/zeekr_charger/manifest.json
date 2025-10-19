@@ -2,7 +2,7 @@
   "domain": "zeekr_charger",
   "name": "Zeekr Charger",
   "codeowners": ["@geoffwatts"],
-  "version": "0.0.1",
+  "version": "0.0.2",
   "documentation": "https://github.com/wattsg/zeekr_charger",
   "integration_type": "device",
   "iot_class": "local_polling",
