@@ -3,7 +3,7 @@
   "name": "Zeekr Charger",
   "codeowners": ["@geoffwatts"],
   "version": "0.0.2",
-  "documentation": "https://github.com/wattsg/zeekr_charger",
+  "documentation": "https://github.com/geoffwatts/zeekr_evse_hass",
   "integration_type": "device",
   "iot_class": "local_polling",
   "loggers": ["custom_components.zeekr_charger"],
