@@ -447,6 +447,25 @@ ZEEKR_TELEMETRY_LEN = 21
 RAEDIAN_TELEMETRY_LEN = 33
 TELEMETRY_LENGTHS = (ZEEKR_TELEMETRY_LEN, RAEDIAN_TELEMETRY_LEN)
 
+# Telemetry frames only arrive while the charger delivers power (about every 15 s).
+# After charging stops the last frame stays cached, so its live values would freeze.
+TELEMETRY_STALE_SECONDS = 60
+
+
+def zero_live_telemetry_values(telemetry: dict) -> dict:
+    """Return a copy of a telemetry dict with power and current set to 0.
+
+    Used when the cached telemetry frame is stale (charging stopped). Voltage,
+    session energy, runtime and temperature keep their last value: the session
+    totals stay meaningful until the next session starts.
+    """
+    result = dict(telemetry)
+    for key, value in telemetry.items():
+        is_live = key in ("power_w", "current_a") or key.startswith(("power_l", "current_l"))
+        if is_live and value is not None:
+            result[key] = 0
+    return result
+
 
 def _parse_b5_telemetry_raedian(payload: bytes) -> Optional[B5Telemetry]:
     """Parse the 33-byte B5 telemetry payload sent by Raedian chargers.

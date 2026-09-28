@@ -128,3 +128,25 @@ def test_zeekr_21_byte_layout_unchanged():
 def test_other_lengths_rejected():
     assert protocol.parse_b5_telemetry(bytes(20)) is None
     assert protocol._parse_b5_telemetry_raedian(bytes(32)) is None
+
+
+def test_stale_telemetry_zeroes_live_values_only():
+    # Shape of the coordinator's telemetry dict after charging stopped (values frozen)
+    frozen = {
+        "power_w": 3214, "power_l1_w": 3214, "power_l2_w": 0, "power_l3_w": None,
+        "current_a": 14.4, "current_l1_a": 14.38, "current_l2_a": 0.0, "current_l3_a": None,
+        "voltage_v": 223.5, "voltage_l1_v": 223.5,
+        "session_energy_kwh": 0.26, "session_runtime_seconds": 301, "temperature_c": 37,
+    }
+    result = protocol.zero_live_telemetry_values(frozen)
+
+    # Live values drop to 0; phases the layout doesn't report stay None
+    assert result["power_w"] == 0 and result["power_l1_w"] == 0
+    assert result["current_a"] == 0 and result["current_l1_a"] == 0
+    assert result["power_l3_w"] is None and result["current_l3_a"] is None
+    # Session totals and voltage keep their last value (read after unplugging)
+    assert result["session_energy_kwh"] == 0.26
+    assert result["session_runtime_seconds"] == 301
+    assert result["voltage_v"] == 223.5 and result["temperature_c"] == 37
+    # The input is not modified
+    assert frozen["power_w"] == 3214

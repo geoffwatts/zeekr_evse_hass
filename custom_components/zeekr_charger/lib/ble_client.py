@@ -97,6 +97,7 @@ class ZeekrBleClient:
         self._pending_responses: dict[int, asyncio.Future[bytes]] = {}
         self._last_heartbeat_state: HeartbeatState = HeartbeatState()
         self._last_telemetry: Optional[B5Telemetry] = None
+        self._last_telemetry_time: Optional[float] = None  # time.monotonic() of the last telemetry frame
         self._last_power_status: Optional[PowerStatus] = None
         
         # Reconnection logic
@@ -559,6 +560,7 @@ class ZeekrBleClient:
                         if heartbeat_temperature is not None and telemetry.temperature_c is None:
                             telemetry.temperature_c = heartbeat_temperature
                         self._last_telemetry = telemetry
+                        self._last_telemetry_time = time.monotonic()
                         # Raedian energy already counts from 0 per session, so an
                         # offset taken mid-session (e.g. after a reconnect) would be wrong
                         if (
@@ -1625,6 +1627,12 @@ class ZeekrBleClient:
     def get_last_telemetry(self) -> Optional[B5Telemetry]:
         """Get the last received telemetry data."""
         return self._last_telemetry
+
+    def get_last_telemetry_age(self) -> Optional[float]:
+        """Seconds since the last telemetry frame arrived, or None if none arrived yet."""
+        if self._last_telemetry_time is None:
+            return None
+        return time.monotonic() - self._last_telemetry_time
 
     def get_session_energy_offset(self) -> Optional[float]:
         """Return the baseline session energy captured at session start."""

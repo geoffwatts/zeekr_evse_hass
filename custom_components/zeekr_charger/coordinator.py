@@ -14,6 +14,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 # from .lib import ZeekrBleClient
 from .const import DEFAULT_SCAN_INTERVAL
 from .device import async_update_device
+from .lib.protocol import TELEMETRY_STALE_SECONDS, zero_live_telemetry_values
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -177,7 +178,13 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and session_runtime is not None
                 ):
                     telemetry_dict["session_runtime_seconds"] = int(session_runtime)
-            
+
+                # Telemetry frames stop when charging stops, so the cached frame would keep
+                # reporting the last power/current. Report 0 once it is stale.
+                telemetry_age = self.client.get_last_telemetry_age()
+                if telemetry_age is None or telemetry_age > TELEMETRY_STALE_SECONDS:
+                    telemetry_dict = zero_live_telemetry_values(telemetry_dict)
+
             # Send heartbeat to keep session alive
             await self.client.send_heartbeat()
             
