@@ -38,6 +38,7 @@ from .protocol import (
     parse_tlv_response,
     parse_b5_telemetry,
     pack_frame_request,
+    TELEMETRY_LENGTHS,
     HeartbeatState,
     PowerStatus,
     CurrentConfig,
@@ -551,14 +552,20 @@ class ZeekrBleClient:
                     _LOGGER.debug("Heartbeat state: %s (%.1fs ago, count=%d)", 
                            self._last_heartbeat_state, self._last_heartbeat_state.seconds_ago, self._heartbeat_count)
                 
-                # Check if this is a 21-byte telemetry frame
-                if len(pf.payload) == 21:
+                # Check if this is a telemetry frame (21-byte Zeekr or 33-byte Raedian)
+                if len(pf.payload) in TELEMETRY_LENGTHS:
                     telemetry = parse_b5_telemetry(pf.payload)
                     if telemetry:
                         if heartbeat_temperature is not None and telemetry.temperature_c is None:
                             telemetry.temperature_c = heartbeat_temperature
                         self._last_telemetry = telemetry
-                        if self._last_heartbeat_state.charging and self._session_energy_offset_kwh is None:
+                        # Raedian energy already counts from 0 per session, so an
+                        # offset taken mid-session (e.g. after a reconnect) would be wrong
+                        if (
+                            telemetry.layout != "raedian33"
+                            and self._last_heartbeat_state.charging
+                            and self._session_energy_offset_kwh is None
+                        ):
                             self._session_energy_offset_kwh = telemetry.session_energy_kwh
                         _LOGGER.debug(
                             "Telemetry received: session=%.2f kWh, voltage=%.1f V, current=%.1f A",
@@ -1192,15 +1199,11 @@ class ZeekrBleClient:
                 
                 if VERBOSE_LOGGING:
                     _LOGGER.info("WiFi status response received: %d bytes", len(full_response))
-                    _LOGGER.info("WiFi status raw response: %s", full_response.hex())
-                    _LOGGER.info("WiFi status response bytes: %s", [hex(b) for b in full_response])
                 
                 # Log the decoded content for debugging
                 if len(full_response) > 2:
                     try:
                         decoded_content = full_response[2:].decode('utf-8', errors='ignore')
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("WiFi status decoded content: %s", repr(decoded_content))
                     except Exception:
                         pass
                 
@@ -1241,19 +1244,23 @@ class ZeekrBleClient:
                     # If we have SSID/password data, consider it successful
                     # Accept 0x01, 0x02, and 0x68 as valid format indicators
                     # 0x68 appears to be a newer firmware format
-                    if second_byte in (0x01, 0x02, 0x68):
+                    # Raedian firmware sends only the format byte before the SSID
+                    # (e.g. 02 'SSID' 0A 'password' 03), so also check the first byte
+                    valid_formats = (0x01, 0x02, 0x68)
+                    if second_byte in valid_formats or first_byte in valid_formats:
                         result["wifi_status"] = "Connected"
                         result["wifi_status_code"] = 0  # Success
                     else:
                         result["wifi_status"] = f"Unknown data format: 0x{second_byte:02X} (expected 0x01, 0x02, or 0x68)"
                         result["wifi_status_code"] = second_byte
-                        _LOGGER.warning("WiFi status received unknown data format: 0x%02X (response: %s)", 
-                                       second_byte, full_response.hex())
+                        # Don't log the response itself: it contains the WiFi password
+                        _LOGGER.warning("WiFi status received unknown data format: 0x%02X (response length: %d)",
+                                       second_byte, len(full_response))
                 
                 # Parse SSID and password if present
                 # Handle C0 02, 8E 02, and 0x68 formats
                 if VERBOSE_LOGGING:
-                    _LOGGER.info("WiFi status parsing: full_response=%s, length=%d", full_response.hex(), len(full_response))
+                    _LOGGER.info("WiFi status parsing: length=%d", len(full_response))
                 if len(full_response) >= 2:
                     if VERBOSE_LOGGING:
                         _LOGGER.info("WiFi status: first_byte=0x%02X, second_byte=0x%02X", full_response[0], full_response[1])
@@ -1261,14 +1268,13 @@ class ZeekrBleClient:
                     try:
                         s = body.decode('utf-8', errors='ignore')
                         if VERBOSE_LOGGING:
-                            _LOGGER.info("WiFi status: decoded body as UTF-8: '%s'", s)
                             _LOGGER.info("WiFi status: decoded body length: %d", len(s))
                         if '\n' in s:
                             ssid, pwd = s.split('\n', 1)
                             # Clean up the password (remove control characters)
                             pwd = pwd.rstrip('\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f')
                             if VERBOSE_LOGGING:
-                                _LOGGER.info("WiFi status: split result - ssid='%s', password='%s'", ssid, pwd)
+                                _LOGGER.info("WiFi status: split result - ssid='%s', password=<%d chars>", ssid, len(pwd))
                             # Only set SSID if we haven't already set it with the corrected value
                             if "ssid" not in result and ssid:
                                 result["ssid"] = ssid
@@ -1285,7 +1291,7 @@ class ZeekrBleClient:
                                    full_response[1] if len(full_response) >= 2 else 0)
                 
                 if VERBOSE_LOGGING:
-                    _LOGGER.info("Parsed WiFi status: %s", result)
+                    _LOGGER.info("Parsed WiFi status: %s", {k: ("<redacted>" if k in ("password", "wifi_extra_hex") else v) for k, v in result.items()})
                 return result
             else:
                 _LOGGER.warning("No WiFi status response received")

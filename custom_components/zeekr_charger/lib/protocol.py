@@ -141,6 +141,9 @@ class B5Telemetry:
       internal temperature in °C
     - Byte 20: checksum / rolling counter
     - Byte 31 (when present): internal temperature for multi-phase payloads
+
+    Raedian (Neo, single-phase connection) sends a 33-byte payload instead,
+    see RAEDIAN_TELEMETRY_LEN and _parse_b5_telemetry_raedian().
     """
     state: int
     port: int
@@ -155,6 +158,12 @@ class B5Telemetry:
     checksum: int = 0  # Trailer byte captured from payload
     session_energy_kwh_exact: float = 0.0
     temperature_c: Optional[int] = None  # Charger temperature derived from heartbeat
+    layout: str = "zeekr21"  # Payload layout: "zeekr21" or "raedian33"
+    # L2/L3 values, only available on the Raedian layout (None otherwise)
+    l2_voltage_centi_v: Optional[int] = None
+    l2_current_centi_a: Optional[int] = None
+    l3_voltage_centi_v: Optional[int] = None
+    l3_current_centi_a: Optional[int] = None
 
     @property
     def voltage_v(self) -> float:
@@ -177,6 +186,30 @@ class B5Telemetry:
     @property
     def sequence_number(self) -> int:
         return self.charge_order_seq
+
+    @property
+    def phase_voltage_v(self) -> tuple[Optional[float], Optional[float], Optional[float]]:
+        """Voltage per phase (L1, L2, L3). L2/L3 are None when the layout doesn't carry them."""
+        return tuple(
+            v / 100.0 if v is not None else None
+            for v in (self.charge_voltage_centi_v, self.l2_voltage_centi_v, self.l3_voltage_centi_v)
+        )
+
+    @property
+    def phase_current_a(self) -> tuple[Optional[float], Optional[float], Optional[float]]:
+        """Current per phase (L1, L2, L3). L2/L3 are None when the layout doesn't carry them."""
+        return tuple(
+            a / 100.0 if a is not None else None
+            for a in (self.charge_current_centi_a, self.l2_current_centi_a, self.l3_current_centi_a)
+        )
+
+    @property
+    def phase_power_w(self) -> tuple[Optional[float], Optional[float], Optional[float]]:
+        """Power per phase (L1, L2, L3) in watts, calculated as voltage x current."""
+        return tuple(
+            v * a if v is not None and a is not None else None
+            for v, a in zip(self.phase_voltage_v, self.phase_current_a)
+        )
 
 
 # ============== Frame Building ==============
@@ -410,11 +443,66 @@ def cmd_get_ble_info(token: bytes) -> bytes:
 
 
 # ============== Response Parsers ==============
+ZEEKR_TELEMETRY_LEN = 21
+RAEDIAN_TELEMETRY_LEN = 33
+TELEMETRY_LENGTHS = (ZEEKR_TELEMETRY_LEN, RAEDIAN_TELEMETRY_LEN)
+
+
+def _parse_b5_telemetry_raedian(payload: bytes) -> Optional[B5Telemetry]:
+    """Parse the 33-byte B5 telemetry payload sent by Raedian chargers.
+
+    Observed on a Raedian Neo (22 kW model, connected single-phase) while
+    charging, all values little-endian:
+    - Byte 0: state (0x06 = charging)
+    - Byte 1: port
+    - Bytes 2-5: session sequence number (constant during a session)
+    - Bytes 6-7: session energy (0.01 kWh), counts up from 0 per session
+    - Bytes 8-25: three 6-byte phase blocks (L1 at 8, L2 at 14, L3 at 20),
+      each: voltage (0.01 V, 2 bytes) | unknown (2 bytes, 0) | current (0.01 A, 2 bytes)
+    - Bytes 26-29: session runtime (seconds)
+    - Byte 30: 32, constant (possibly max current per phase in A)
+    - Byte 31: 1, constant (possibly number of phases in use)
+    - Byte 32: internal temperature (°C), rises slowly while charging
+
+    Energy, L1 voltage/current and runtime are confirmed against a 17-minute
+    capture: V x I integrated over time matches the energy counter within 0.01 kWh.
+    The L2/L3 blocks are inferred from the repeating layout:
+    on a single-phase connection they read 0.10 V and 0 A (floating phases).
+    They still need confirming on a 3-phase connection.
+    """
+    if len(payload) != RAEDIAN_TELEMETRY_LEN:
+        return None
+
+    session_energy_centikwh = int.from_bytes(payload[6:8], "little")
+
+    return B5Telemetry(
+        state=payload[0],
+        port=payload[1],
+        charge_order_seq=int.from_bytes(payload[2:6], "little"),
+        charge_electricity_centikwh=session_energy_centikwh,
+        charge_voltage_centi_v=int.from_bytes(payload[8:10], "little"),
+        charge_current_centi_a=int.from_bytes(payload[12:14], "little"),
+        charge_duration_seconds=int.from_bytes(payload[26:30], "little"),
+        phase_flags=int.from_bytes(payload[10:12], "little"),
+        port_hint=payload[1],
+        session_energy_kwh_exact=session_energy_centikwh / 100.0,
+        temperature_c=payload[32],
+        layout="raedian33",
+        l2_voltage_centi_v=int.from_bytes(payload[14:16], "little"),
+        l2_current_centi_a=int.from_bytes(payload[18:20], "little"),
+        l3_voltage_centi_v=int.from_bytes(payload[20:22], "little"),
+        l3_current_centi_a=int.from_bytes(payload[24:26], "little"),
+    )
+
+
 def parse_b5_telemetry(payload: bytes) -> Optional[B5Telemetry]:
     """Parse B5 telemetry payload with empirically determined structure."""
-    if len(payload) < 21:
+    if len(payload) == RAEDIAN_TELEMETRY_LEN:
+        return _parse_b5_telemetry_raedian(payload)
+
+    if len(payload) < ZEEKR_TELEMETRY_LEN:
         return None
-    
+
     try:
         # Parse with empirically determined byte positions (see B5Telemetry docstring)
         state = payload[0]
@@ -547,7 +635,7 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
         
         # Limit snapshot parsed
         
-    elif len(payload) == 21:
+    elif len(payload) in TELEMETRY_LENGTHS:
         # Full telemetry frame - parse detailed charging data
         telemetry = parse_b5_telemetry(payload)
         if telemetry:

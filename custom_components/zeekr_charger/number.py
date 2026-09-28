@@ -8,12 +8,12 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfElectricCurrent
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN, MIN_CHARGE_RATE, DEFAULT_MAX_CHARGE_RATE
+from .device import build_device_info
 
 
 
@@ -38,12 +38,7 @@ class ZeekrChargerNumber(CoordinatorEntity, NumberEntity):
     def __init__(self, coordinator) -> None:
         """Initialize the number entity."""
         super().__init__(coordinator)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.client.serial)},
-            name=f"Zeekr Charger {coordinator.client.serial}",
-            manufacturer="Zeekr",
-            model="Wallbox Charger",
-        )
+        self._attr_device_info = build_device_info(coordinator)
         self._attr_unique_id = f"{coordinator.client.serial}_{self.__class__.__name__.lower()}"
 
 
