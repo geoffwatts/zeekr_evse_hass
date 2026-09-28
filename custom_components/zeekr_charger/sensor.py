@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -9,8 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
+    UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
+    UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -90,6 +93,7 @@ class ZeekrChargerCurrentLimitSensor(ZeekrChargerSensor):
 
     _attr_name = "Charge Rate"
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_device_class = SensorDeviceClass.CURRENT
 
     _attr_icon = "mdi:lightning-bolt"
 
@@ -114,6 +118,7 @@ class ZeekrChargerMaxCurrentCapacitySensor(ZeekrChargerSensor):
 
     _attr_name = "Rated Current Capacity"
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_device_class = SensorDeviceClass.CURRENT
     _attr_icon = "mdi:lightning-bolt-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -213,21 +218,30 @@ class ZeekrChargerProductionDateSensor(ZeekrChargerSensor):
     """Sensor for charger production date."""
 
     _attr_name = "Production Date"
+    _attr_device_class = SensorDeviceClass.DATE
     _attr_icon = "mdi:calendar"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
-    def native_value(self) -> str | None:
-        """Return the production date."""
+    def native_value(self) -> date | None:
+        """Return the production date (reported as e.g. "2024/8/14")."""
         basic_info = self.coordinator.data.get("basic_info", {})
-        return basic_info.get("production_date")
+        production_date = basic_info.get("production_date")
+        if not production_date:
+            return None
+        try:
+            year, month, day = (int(part) for part in str(production_date).split("/"))
+            return date(year, month, day)
+        except ValueError:
+            return None
 
 
 class ZeekrChargerRatedPowerSensor(ZeekrChargerSensor):
     """Sensor for rated power."""
 
     _attr_name = "Rated Power"
-    _attr_native_unit_of_measurement = "kW"
+    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
+    _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:flash"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -433,7 +447,8 @@ class ZeekrChargerSessionEnergySensor(ZeekrChargerSensor):
     """Sensor for energy consumed in current session."""
 
     _attr_name = "Session Energy"
-    _attr_native_unit_of_measurement = "kWh"
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:lightning-bolt"
 
@@ -451,7 +466,8 @@ class ZeekrChargerVoltageSensor(ZeekrChargerSensor):
     """Sensor for line voltage."""
 
     _attr_name = "Voltage"
-    _attr_native_unit_of_measurement = "V"
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:lightning-bolt"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -471,6 +487,7 @@ class ZeekrChargerCurrentSensor(ZeekrChargerSensor):
 
     _attr_name = "In-use Current"
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_device_class = SensorDeviceClass.CURRENT
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:current-ac"
 
@@ -585,7 +602,8 @@ class ZeekrChargerSessionRuntimeSensor(ZeekrChargerSensor):
     """Sensor for session runtime duration."""
 
     _attr_name = "Session Runtime"
-    _attr_native_unit_of_measurement = "s"
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_icon = "mdi:timer"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -627,6 +645,7 @@ class ZeekrChargerGridCapacitySensor(ZeekrChargerSensor):
 
     _attr_name = "Grid Capacity"
     _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_device_class = SensorDeviceClass.CURRENT
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:transmission-tower"
     _attr_entity_category = EntityCategory.DIAGNOSTIC

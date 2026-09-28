@@ -49,7 +49,7 @@ class ZeekrChargerChargingBinarySensor(ZeekrChargerBinarySensor):
 
     _attr_name = "Charging"
     _attr_icon = "mdi:ev-station"
-    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
 
     @property
     def is_on(self) -> bool:
@@ -63,7 +63,7 @@ class ZeekrChargerCarConnectedBinarySensor(ZeekrChargerBinarySensor):
 
     _attr_name = "Car Connected"
     _attr_icon = "mdi:car-electric"
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_device_class = BinarySensorDeviceClass.PLUG
 
     @property
     def is_on(self) -> bool:
@@ -77,6 +77,7 @@ class ZeekrChargerHeartbeatBinarySensor(ZeekrChargerBinarySensor):
 
     _attr_name = "Heartbeat Active <60s"
     _attr_icon = "mdi:heart-pulse"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
