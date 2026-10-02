@@ -126,22 +126,26 @@ class CurrentConfig:
 class B5Telemetry:
     """Full heartbeat telemetry during active charging.
 
-    Empirically confirmed layout on current Zeekr firmware (single and multi-phase):
+    Zeekr 21-byte layout, little-endian. Confirmed on a single-phase 7 kW Neo
+    against the vendor app (voltage, current and energy to 0.01 kWh) and against
+    wall-clock time (runtime), over a 281 s session:
     - Byte 0: state (0x06 = charging)
-    - Byte 1: port hint (often zero; port index is repeated at byte 19)
-    - Bytes 2-5: session sequence number (little-endian)
-    - Bytes 6-7: phase/line flags (bitmask, 0 = single phase)
-    - Bytes 8-9: line voltage (little-endian centivolts)
-    - Bytes 10-11: reserved (observed as 0 on single-phase units)
-    - Byte 12: charge current (deci-amps)
-    - Bytes 13-14: session energy (little-endian; some firmwares append a third
-      byte which we interpret using the extended-energy logic)
-    - Bytes 15-16: session runtime (big-endian seconds)
-    - Byte 18: state repeat / status echo
-    - Byte 19: port index (when in range) and, on single-phase units, the
-      internal temperature in °C
-    - Byte 20: checksum / rolling counter
-    - Byte 31 (when present): internal temperature for multi-phase payloads
+    - Byte 1: port
+    - Bytes 2-5: session sequence number (constant during a session)
+    - Bytes 6-7: session energy (0.01 kWh), counts up from 0 per session
+    - Bytes 8-9: line voltage (0.01 V)
+    - Bytes 10-11: reserved (0)
+    - Bytes 12-13: charge current (0.01 A)
+    - Bytes 14-17: session runtime (seconds)
+    - Byte 18: 15, constant (unknown)
+    - Byte 19: 1, constant (possibly number of phases in use)
+    - Byte 20: internal temperature (C). Unconfirmed: it read a constant 30 over
+      the 5 minute capture, but no other byte in the frame is a plausible
+      temperature, and it sits where the Raedian layout has its temperature.
+
+    This is the Raedian layout below without the L2/L3 blocks. The older reading
+    of this layout (energy in bytes 14-15, runtime in 15-16, "phase flags" in 6-7)
+    was wrong: it read the energy as phase flags and the runtime as energy.
 
     Raedian (Neo, single-phase connection) sends a 33-byte payload instead,
     see RAEDIAN_TELEMETRY_LEN and _parse_b5_telemetry_raedian().
@@ -523,70 +527,23 @@ def parse_b5_telemetry(payload: bytes) -> Optional[B5Telemetry]:
     if len(payload) < ZEEKR_TELEMETRY_LEN:
         return None
 
-    try:
-        # Parse with empirically determined byte positions (see B5Telemetry docstring)
-        state = payload[0]
-        port_hint = payload[1]
+    session_energy_centikwh = int.from_bytes(payload[6:8], "little")
 
-        # 4-byte sequence number (not energy!)
-        charge_order_seq = int.from_bytes(payload[2:6], "little")
-        phase_flags = int.from_bytes(payload[6:8], "little")
-
-        # 2-byte voltage - divided by 100.0
-        charge_voltage_centi_v = int.from_bytes(payload[8:10], "little")
-
-        # Current (firmware now uses two-byte little-endian 0.01A units; older
-        # builds only populate the low byte with 0.1A steps).
-        raw_current = int.from_bytes(payload[12:14], "little")
-        if (raw_current >> 8) > 0:
-            charge_current_centi_a = raw_current
-        else:
-            charge_current_centi_a = payload[12] * 10
-
-        # Session energy: 2 bytes at bytes 14-15, in centi-kWh units (0.01 kWh)
-        # This matches the Android app parsing and working Python implementation
-        session_energy_centikwh = int.from_bytes(payload[14:16], "little")
-        energy_kwh = session_energy_centikwh / 100.0
-        charge_electricity_centikwh = session_energy_centikwh
-
-        # Session runtime appears as big-endian seconds (two-byte counter)
-        charge_duration_seconds = (payload[15] << 8) | payload[16]
-
-        state_repeat = payload[18]
-
-        temperature_c: Optional[int] = None
-        port = port_hint
-
-        if len(payload) > 19:
-            port_candidate = payload[19]
-            if phase_flags == 0:
-                temperature_c = port_candidate
-            # Use candidate as port when it is within sensible range (1..2)
-            if 0 < port_candidate <= 2:
-                port = port_candidate
-
-        if phase_flags != 0 and len(payload) > 31:
-            temperature_c = payload[31]
-
-        checksum = payload[20]
-
-        return B5Telemetry(
-            state=state,
-            port=port,
-            charge_order_seq=charge_order_seq,
-            charge_electricity_centikwh=int(charge_electricity_centikwh),
-            charge_voltage_centi_v=charge_voltage_centi_v,
-            charge_current_centi_a=charge_current_centi_a,
-            charge_duration_seconds=charge_duration_seconds,
-            phase_flags=phase_flags,
-            state_repeat=state_repeat,
-            port_hint=port_hint,
-            checksum=checksum,
-            session_energy_kwh_exact=energy_kwh,
-            temperature_c=temperature_c,
-        )
-    except Exception as e:
-        return None
+    return B5Telemetry(
+        state=payload[0],
+        port=payload[1],
+        charge_order_seq=int.from_bytes(payload[2:6], "little"),
+        charge_electricity_centikwh=session_energy_centikwh,
+        charge_voltage_centi_v=int.from_bytes(payload[8:10], "little"),
+        charge_current_centi_a=int.from_bytes(payload[12:14], "little"),
+        charge_duration_seconds=int.from_bytes(payload[14:18], "little"),
+        phase_flags=int.from_bytes(payload[10:12], "little"),
+        state_repeat=payload[18],
+        port_hint=payload[1],
+        checksum=payload[20],
+        session_energy_kwh_exact=session_energy_centikwh / 100.0,
+        temperature_c=payload[20],
+    )
 
 
 def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> HeartbeatState:
@@ -634,6 +591,19 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
         # Keep-alive pattern
         pass  # Keep-alive received
         
+    elif len(payload) == 8 and map_heartbeat_status_code(payload[2]) is None:
+        # End-of-session summary: [state][port][energy u16, 0.01 kWh][runtime u32, s].
+        # Captured after a charge stopped: 08 01 1a00 1b010000 = finishing,
+        # 0.26 kWh, 283 s (the app reported 0.261 kWh).
+        state_info.port = payload[1]
+        state_mapping = map_heartbeat_status_code(payload[0])
+        if state_mapping:
+            state_info.car_connected = state_mapping.car_connected
+            state_info.charging = state_mapping.charging
+            state_info.state = state_mapping.state
+        else:
+            state_info.state = f"unknown_{payload[0]:02X}"
+
     elif len(payload) == 8:
         # B5LimitSnapshot - 8-byte current limit advertisement
         record_type = payload[0]

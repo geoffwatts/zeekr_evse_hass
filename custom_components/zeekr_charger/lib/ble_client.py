@@ -513,14 +513,6 @@ class ZeekrBleClient:
                             telemetry.temperature_c = heartbeat_temperature
                         self._last_telemetry = telemetry
                         self._last_telemetry_time = time.monotonic()
-                        # Raedian energy already counts from 0 per session, so an
-                        # offset taken mid-session (e.g. after a reconnect) would be wrong
-                        if (
-                            telemetry.layout != "raedian33"
-                            and self._last_heartbeat_state.charging
-                            and self._session_energy_offset_kwh is None
-                        ):
-                            self._session_energy_offset_kwh = telemetry.session_energy_kwh
                         _LOGGER.debug(
                             "Telemetry received: session=%.2f kWh, voltage=%.1f V, current=%.1f A",
                             telemetry.session_energy_kwh,
