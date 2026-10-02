@@ -13,6 +13,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 # Import locally to avoid import issues during config flow
 # from .lib import ZeekrBleClient
 from .const import DEFAULT_SCAN_INTERVAL
+from .device import async_update_device
+from .lib.protocol import TELEMETRY_STALE_SECONDS, zero_live_telemetry_values
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -82,7 +84,11 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     basic_info = await self.client.query_charger_basic_info()
                 except Exception as e:
                     basic_info = {}
-                
+
+                # Name the device after the model it reports (e.g. Raedian Neo)
+                if basic_info:
+                    async_update_device(self.hass, self.client.serial, basic_info)
+
                 # Query charger protection information (for safety sensors)
                 try:
                     protection_info = await self.client.query_charger_protection_info()
@@ -145,7 +151,18 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 session_energy = telemetry.session_energy_kwh
                 if session_energy_offset is not None:
                     session_energy = max(0.0, session_energy - session_energy_offset)
+                phase_powers = [p for p in telemetry.phase_power_w if p is not None]
+                per_phase: dict[str, Any] = {}
+                for phase, (voltage, current, power) in enumerate(
+                    zip(telemetry.phase_voltage_v, telemetry.phase_current_a, telemetry.phase_power_w),
+                    start=1,
+                ):
+                    per_phase[f"voltage_l{phase}_v"] = round(voltage, 1) if voltage is not None else None
+                    per_phase[f"current_l{phase}_a"] = round(current, 2) if current is not None else None
+                    per_phase[f"power_l{phase}_w"] = round(power) if power is not None else None
                 telemetry_dict = {
+                    **per_phase,
+                    "power_w": round(sum(phase_powers)) if phase_powers else None,
                     **telemetry.__dict__,
                     "voltage_v": round(telemetry.voltage_v, 1),
                     "current_a": round(telemetry.current_a, 1),
@@ -161,7 +178,13 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and session_runtime is not None
                 ):
                     telemetry_dict["session_runtime_seconds"] = int(session_runtime)
-            
+
+                # Telemetry frames stop when charging stops, so the cached frame would keep
+                # reporting the last power/current. Report 0 once it is stale.
+                telemetry_age = self.client.get_last_telemetry_age()
+                if telemetry_age is None or telemetry_age > TELEMETRY_STALE_SECONDS:
+                    telemetry_dict = zero_live_telemetry_values(telemetry_dict)
+
             # Send heartbeat to keep session alive
             await self.client.send_heartbeat()
             

@@ -129,6 +129,23 @@ Heartbeats appear multiple times per minute and vary by length:
   - Bytes 16–19: session runtime (seconds)
   - Byte 20: checksum / rolling counter
 
+- **Raedian telemetry block (33 bytes)**, seen on a Raedian Neo on a single-phase connection
+  - Byte 0: state (`0x06` = charging)
+  - Byte 1: port
+  - Bytes 2–5: session sequence number (little endian)
+  - Bytes 6–7: session energy (0.01 kWh, counts from 0 each session)
+  - Bytes 8–25: three 6-byte phase blocks (L1 at 8, L2 at 14, L3 at 20), each laid out as
+    `voltage (0.01 V, 2 bytes) | unknown (2 bytes, 0) | current (0.01 A, 2 bytes)`.
+    L1 is confirmed. L2/L3 are inferred from the repeating layout (they read 0.10 V / 0 A on a
+    single-phase connection) and still need confirming on a 3-phase connection.
+  - Bytes 26–29: session runtime (seconds)
+  - Byte 30: `32`, constant (possibly max current per phase in A)
+  - Byte 31: `1`, constant (possibly number of phases in use)
+  - Byte 32: internal temperature (°C), rose 33 → 36 over 17 minutes of charging
+  - Checked against a 17-minute capture at ~14.4 A: voltage × current integrated over time
+    (0.903 kWh) matches the energy counter (0.91 kWh), and runtime matches the wall clock exactly.
+- **Raedian WiFi status (`0xE4`)** has only one header byte before the SSID: `02 <ssid> 0A <password> 03`.
+
 ### State Code Map
 | Value | Description        | Car Connected | Charging |
 |-------|--------------------|---------------|----------|

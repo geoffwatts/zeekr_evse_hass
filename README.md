@@ -23,6 +23,7 @@ A custom Home Assistant integration that connects your Zeekr EVSE wallbox (and m
 * Not tested: 11 kW/3-phase models (dealer wouldn't swap mine, unfortunately)
 * Firmware: Works with stock firmware; **OCPP current control is not supported** by the charger, so this integration uses BLE instead.
 * NB: You can use the esphome bluetooth proxy https://esphome.io/projects/ to repeat BLE over WiFi if your homeassistant box isn't nearby your zeekr wallbox.
+* Also tested on a **Tri-phase 22 kW Raedian branded** unit.
 
 If you try a different model, please report your results in an issue.
 
