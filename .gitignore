@@ -207,3 +207,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# BLE listener output (may contain identifiers)
+captures/
