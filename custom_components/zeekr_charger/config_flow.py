@@ -74,10 +74,12 @@ class ZeekrChargerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ZeekrChargerOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for the Zeekr charger config entry."""
+    """Handle options for the Zeekr charger config entry.
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    Note: do not set self.config_entry in __init__ - recent Home Assistant
+    versions set it automatically on the base class, and custom integrations
+    that assign it themselves raise at runtime.
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage the options for the custom component."""
