@@ -1,8 +1,9 @@
 """
 Clean BLE Client for Zeekr Charger Communication
 
-To enable verbose BLE protocol logging (tx/rx chunks, opcodes, frame parsing details),
-set VERBOSE_LOGGING = True at the top of this file.
+For verbose BLE protocol logging (tx/rx chunks, opcodes, frame parsing details),
+set the ``custom_components.zeekr_charger`` logger to ``debug``. Raw hex frame
+dumps additionally need LOG_RAW_FRAMES = True below (they may contain secrets).
 """
 
 from __future__ import annotations
@@ -51,8 +52,10 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Verbose logging control - set to True to enable detailed BLE protocol logging
-VERBOSE_LOGGING = False
+# Raw frame dumps (hex of every tx/rx frame and response) are opt-in, separately
+# from the debug log level: some responses, e.g. the 0xE4 WiFi status, contain
+# the charger's WiFi password, and debug logs are routinely pasted into issues.
+LOG_RAW_FRAMES = False
 
 # Simple focused logging for key events
 def log_connection(message: str):
@@ -65,13 +68,13 @@ def log_status(message: str):
 
 def log_hex_tx(data: bytes):
     """Log transmitted hex data"""
-    if VERBOSE_LOGGING:
-        _LOGGER.info(f"[TX] {data.hex().upper()}")
+    if LOG_RAW_FRAMES:
+        _LOGGER.debug(f"[TX] {data.hex().upper()}")
 
 def log_hex_rx(data: bytes):
     """Log received hex data"""
-    if VERBOSE_LOGGING:
-        _LOGGER.info(f"[RX] {data.hex().upper()}")
+    if LOG_RAW_FRAMES:
+        _LOGGER.debug(f"[RX] {data.hex().upper()}")
 
 
 class ZeekrBleClient:
@@ -257,13 +260,13 @@ class ZeekrBleClient:
             return
         
         self._connection_monitor_task = asyncio.create_task(self._connection_monitor_loop())
-        if VERBOSE_LOGGING:
-            _LOGGER.info("Started connection monitor")
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("Started connection monitor")
 
     async def _connection_monitor_loop(self) -> None:
         """Monitor connection health and trigger reconnection if needed."""
-        if VERBOSE_LOGGING:
-            _LOGGER.info("Connection monitor started")
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("Connection monitor started")
         
         while self._should_reconnect:
             try:
@@ -415,7 +418,7 @@ class ZeekrBleClient:
         
         # Reassemble frames
         for frame in self._reassemble_frames(sender, bytes(data)):
-            if VERBOSE_LOGGING:
+            if LOG_RAW_FRAMES:
                 _LOGGER.debug("RX COMPLETE FRAME: %s", frame.hex().upper())
             self._process_frame(frame)
 
@@ -454,15 +457,15 @@ class ZeekrBleClient:
         """Process a complete frame."""
         try:
             pf = parse_frame(frame_data)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("=== PARSED FRAME ===")
-                _LOGGER.info("Opcode: 0x%02X", pf.opcode)
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("=== PARSED FRAME ===")
+                _LOGGER.debug("Opcode: 0x%02X", pf.opcode)
                 _LOGGER.debug("Token: %s", pf.token.hex().upper())
                 _LOGGER.debug("Payload length: %d", len(pf.payload))
                 _LOGGER.debug("Payload: %s", pf.payload.hex().upper())
                 _LOGGER.debug("Tail: %s", pf.tail.hex().upper() if pf.tail else "None")
-                _LOGGER.info("Status: 0x%02X", pf.status)
-                _LOGGER.info("===================")
+                _LOGGER.debug("Status: 0x%02X", pf.status)
+                _LOGGER.debug("===================")
 
             # Handle authentication response
             if pf.opcode == 0xFE and pf.status == 0 and not self._token:
@@ -477,8 +480,8 @@ class ZeekrBleClient:
             # Handle heartbeat responses (0xB5) - track charging sessions
             if pf.opcode == 0xB5:
                 self._heartbeat_count += 1
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Heartbeat #%d: payload=%s, tail=%s", self._heartbeat_count, pf.payload.hex(), pf.tail.hex() if pf.tail else "None")
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Heartbeat #%d: payload=%s, tail=%s", self._heartbeat_count, pf.payload.hex(), pf.tail.hex() if pf.tail else "None")
                 
                 # Parse heartbeat state with timestamp tracking
                 # The tail byte is frame-level metadata (ack/status), not part of heartbeat payload
@@ -498,7 +501,7 @@ class ZeekrBleClient:
                     self._charging_session_start = None
                     self._session_energy_offset_kwh = None
                 
-                if VERBOSE_LOGGING:
+                if _LOGGER.isEnabledFor(logging.DEBUG):
                     _LOGGER.debug("Heartbeat state: %s (%.1fs ago, count=%d)", 
                            self._last_heartbeat_state, self._last_heartbeat_state.seconds_ago, self._heartbeat_count)
                 
@@ -525,7 +528,7 @@ class ZeekrBleClient:
                             telemetry.current_a,
                         )
                 
-                if VERBOSE_LOGGING:
+                if _LOGGER.isEnabledFor(logging.DEBUG):
                     _LOGGER.debug("Received heartbeat response, state: %s", self._last_heartbeat_state)
 
             # Handle potential 0x8E opcode responses (unknown heartbeat type)
@@ -543,33 +546,35 @@ class ZeekrBleClient:
 
             # Handle 0xE0 power status responses (like auth demo)
             elif pf.opcode == 0xE0:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Processing 0xE0 power status response (like auth demo)")
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug("Processing 0xE0 power status response (like auth demo)")
                 result = parse_power_status(pf.payload, pf.tail)
                 self._last_power_status = result
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Stored power status: %s", result)
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug("Stored power status: %s", result)
             
             # Handle other responses
             elif pf.opcode in self._pending_responses:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Matched response for opcode 0x%02X", pf.opcode)
+                if _LOGGER.isEnabledFor(logging.DEBUG):
+                    _LOGGER.debug("Matched response for opcode 0x%02X", pf.opcode)
                 future = self._pending_responses.pop(pf.opcode)
                 if not future.done():
                     # For opcodes that need payload+tail (tail contains important data like closing JSON brace)
                     # C1-C9 are configuration JSON queries, E0 and A9 use tail for additional data
                     if pf.opcode in [0xE0, 0xA9, 0xC1, 0xC2, 0xC4, 0xC5, 0xC7, 0xC9]:
-                        if VERBOSE_LOGGING:
+                        if LOG_RAW_FRAMES:
                             _LOGGER.debug("Response for opcode 0x%02X: payload=%s, tail=%s", pf.opcode, pf.payload.hex(), pf.tail.hex() if pf.tail else "None")
                         future.set_result((pf.payload, pf.tail))
                     else:
-                        if VERBOSE_LOGGING:
+                        if LOG_RAW_FRAMES:
                             _LOGGER.debug("Response for opcode 0x%02X: payload=%s", pf.opcode, pf.payload.hex())
                         future.set_result(pf.payload)
             else:
                 # Log unknown opcodes at warning level for better visibility
-                _LOGGER.warning("Received unknown opcode 0x%02X (no pending response): payload=%s, tail=%s, status=0x%02X", 
-                               pf.opcode, pf.payload.hex(), pf.tail.hex() if pf.tail else "None", pf.status)
+                # 0xE4 (WiFi status) carries the WiFi password: log its length only
+                payload_repr = f"<{len(pf.payload)} bytes>" if pf.opcode == 0xE4 else pf.payload.hex()
+                _LOGGER.warning("Received unknown opcode 0x%02X (no pending response): payload=%s, status=0x%02X",
+                                pf.opcode, payload_repr, pf.status)
                 _LOGGER.debug("Unknown opcode 0x%02X details: token=%s, header=%s", 
                              pf.opcode, pf.token.hex(), pf.header.hex())
 
@@ -626,8 +631,8 @@ class ZeekrBleClient:
             chunk_size = 20
             for i in range(0, len(frame), chunk_size):
                 chunk = frame[i : i + chunk_size]
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("TX CHUNK %d: %s", i // chunk_size + 1, chunk.hex().upper())
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("TX CHUNK %d: %s", i // chunk_size + 1, chunk.hex().upper())
                 await self._client.write_gatt_char(GATT_CHAR_WNR, chunk, response=False)
                 await asyncio.sleep(0.01)  # Small delay between chunks
         except Exception as exc:
@@ -643,16 +648,16 @@ class ZeekrBleClient:
         future = asyncio.Future()
         self._pending_responses[opcode] = future
         
-        if VERBOSE_LOGGING:
-            _LOGGER.info("Waiting for response with opcode 0x%02X, timeout=%s", opcode, timeout)
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("Waiting for response with opcode 0x%02X, timeout=%s", opcode, timeout)
         
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
-            if VERBOSE_LOGGING:
+            if LOG_RAW_FRAMES:
                 if isinstance(result, tuple):
-                    _LOGGER.info("Received tuple response for opcode 0x%02X: payload=%s, tail=%s", opcode, result[0].hex(), result[1].hex())
+                    _LOGGER.debug("Received tuple response for opcode 0x%02X: payload=%s, tail=%s", opcode, result[0].hex(), result[1].hex())
                 else:
-                    _LOGGER.info("Received response for opcode 0x%02X: %s", opcode, result.hex() if result else "None")
+                    _LOGGER.debug("Received response for opcode 0x%02X: %s", opcode, result.hex() if result else "None")
             return result
         except asyncio.TimeoutError:
             _LOGGER.warning("Timeout waiting for response with opcode 0x%02X after %s seconds", opcode, timeout)
@@ -679,18 +684,18 @@ class ZeekrBleClient:
         
         try:
             # Exactly like auth demo: pack_frame_request(0xE0, token) and send
-            if VERBOSE_LOGGING:
+            if _LOGGER.isEnabledFor(logging.DEBUG):
                 _LOGGER.debug("Querying power status (like auth demo - fire and forget)...")
             frame = pack_frame_request(0xE0, self._token)
-            if VERBOSE_LOGGING:
+            if LOG_RAW_FRAMES:
                 _LOGGER.debug("Sending power status frame: %s", frame.hex())
             await self._send_frame(frame)
             
             # Wait like auth demo does (0.3 seconds) then return
             # The response will be processed by the notification handler
             await asyncio.sleep(0.3)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("0xE0 query sent, response will be processed by notification handler")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("0xE0 query sent, response will be processed by notification handler")
             
             # Return None - the response is handled asynchronously by the notification handler
             # This matches the auth demo behavior
@@ -792,9 +797,9 @@ class ZeekrBleClient:
     async def _perform_initial_setup(self) -> None:
         """Perform initial setup after authentication (exactly like auth demo)."""
         try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Performing initial setup following auth demo sequence...")
-                _LOGGER.info("Sending time sync...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Performing initial setup following auth demo sequence...")
+                _LOGGER.debug("Sending time sync...")
             
             # Send time sync first (like auth demo) - it's important for session validity
             time_sync_success = await self.sync_time()
@@ -802,17 +807,17 @@ class ZeekrBleClient:
                 _LOGGER.warning("Time sync failed - this may cause subsequent commands to fail")
             
             # Wait a little for the acknowledgement to arrive before heartbeats (like auth demo)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Waiting for time sync acknowledgement...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Waiting for time sync acknowledgement...")
             await asyncio.sleep(1.0)
             
             # Send heartbeat (like auth demo) - don't wait for response
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending heartbeat...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Sending heartbeat...")
             heartbeat_frame = cmd_heartbeat(self._token)
             await self._send_frame(heartbeat_frame)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Heartbeat sent")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Heartbeat sent")
             await asyncio.sleep(0.5)
             
             _LOGGER.info("Initial setup completed")
@@ -828,15 +833,15 @@ class ZeekrBleClient:
         try:
             _LOGGER.info("Authorizing charge session...")
             frame = cmd_auth_charge(self._token)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending authorize charge frame: %s", frame.hex())
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("Sending authorize charge frame: %s", frame.hex())
             await self._send_frame(frame)
             
             _LOGGER.info("Waiting for authorize charge response...")
             response = await self._wait_for_response(0xB4, timeout=5.0)
             if response:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Charge authorization response received: %s", response.hex())
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Charge authorization response received: %s", response.hex())
                 return True
             else:
                 _LOGGER.warning("No charge authorization response received")
@@ -854,15 +859,15 @@ class ZeekrBleClient:
         try:
             _LOGGER.info("Stopping charge session...")
             frame = cmd_stop_charge(self._token)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending stop charge frame: %s", frame.hex())
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("Sending stop charge frame: %s", frame.hex())
             await self._send_frame(frame)
             
             _LOGGER.info("Waiting for stop charge response...")
             response = await self._wait_for_response(0xB6, timeout=5.0)
             if response:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Stop charge response received: %s", response.hex())
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Stop charge response received: %s", response.hex())
                 return True
             else:
                 _LOGGER.warning("No stop charge response received")
@@ -879,19 +884,19 @@ class ZeekrBleClient:
             return False
         
         try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Setting charge model to %s", "auto" if mode == 0x00 else "authorized")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Setting charge model to %s", "auto" if mode == 0x00 else "authorized")
             frame = pack_frame_request(0xB3, self._token, bytes([mode]))
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending charge model frame: %s", frame.hex())
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("Sending charge model frame: %s", frame.hex())
             await self._send_frame(frame)
             
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Waiting for charge model response...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Waiting for charge model response...")
             response = await self._wait_for_response(0xB3, timeout=5.0)
             if response:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Charge model response received: %s", response.hex())
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Charge model response received: %s", response.hex())
                 return True
             else:
                 _LOGGER.warning("No charge model response received")
@@ -907,38 +912,38 @@ class ZeekrBleClient:
             return None
         
         try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying charge mode (0xE6)...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Querying charge mode (0xE6)...")
             frame = pack_frame_request(0xE6, self._token, b"")
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending charge mode query frame: %s", frame.hex())
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("Sending charge mode query frame: %s", frame.hex())
             await self._send_frame(frame)
             
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Waiting for charge mode query response...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Waiting for charge mode query response...")
             response = await self._wait_for_response(0xE6, timeout=5.0)
             if response:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Charge mode query response received: %s (length: %d)", response.hex(), len(response))
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Charge mode query response received: %s (length: %d)", response.hex(), len(response))
                 # Parse the response - handle optional selector byte 0x26 like other queries
                 if len(response) >= 1:
                     # Check for optional selector byte 0x26 (like in zeekr_dumper_pro.py)
                     if response[0] == 0x26 and len(response) >= 2:
                         mode = response[1]
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Found selector byte 0x26, using second byte as mode: 0x%02X", mode)
+                        if _LOGGER.isEnabledFor(logging.DEBUG):
+                            _LOGGER.debug("Found selector byte 0x26, using second byte as mode: 0x%02X", mode)
                     else:
                         mode = response[0]
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Using first byte as mode: 0x%02X", mode)
+                        if _LOGGER.isEnabledFor(logging.DEBUG):
+                            _LOGGER.debug("Using first byte as mode: 0x%02X", mode)
                     
                     # Log all bytes for debugging
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Full response bytes: %s", [hex(b) for b in response])
+                    if _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug("Full response bytes: %s", [hex(b) for b in response])
                     
                     mode_name = self._get_charge_mode_name(mode)
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Current charge mode: 0x%02X (%s)", mode, mode_name)
+                    if _LOGGER.isEnabledFor(logging.DEBUG):
+                        _LOGGER.debug("Current charge mode: 0x%02X (%s)", mode, mode_name)
                     return mode
                 else:
                     _LOGGER.warning("Charge mode response too short: %s", response.hex())
@@ -984,32 +989,32 @@ class ZeekrBleClient:
             
             # Use the same timezone calculation as the auth demo
             tz_minutes = -time.timezone // 60  # Calculate like auth demo
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Timezone offset minutes: %d (calculated like auth demo)", tz_minutes)
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Timezone offset minutes: %d (calculated like auth demo)", tz_minutes)
             
             # Use current time 
             epoch = int(time.time())
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Epoch time: %d (current time like auth demo)", epoch)
-                _LOGGER.info("Epoch hex: %08x", epoch)
-                _LOGGER.info("Tz_minutes hex: %04x", tz_minutes)
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Epoch time: %d (current time like auth demo)", epoch)
+                _LOGGER.debug("Epoch hex: %08x", epoch)
+                _LOGGER.debug("Tz_minutes hex: %04x", tz_minutes)
             
             # Use the epoch parameter 
             frame = cmd_sync_time(self._token, tz_minutes=tz_minutes)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Sending time sync frame: %s", frame.hex())
+            if LOG_RAW_FRAMES:
+                _LOGGER.debug("Sending time sync frame: %s", frame.hex())
                 # Frame structure: SOF(1) + opcode(1) + header(5) + checksum(1) + token(8) + payload(variable)
-                _LOGGER.info("Time sync frame breakdown: SOF=%s, opcode=%s, header=%s, checksum=%s, token=%s, payload=%s", 
+                _LOGGER.debug("Time sync frame breakdown: SOF=%s, opcode=%s, header=%s, checksum=%s, token=%s, payload=%s", 
                             frame[:1].hex(), frame[1:2].hex(), frame[2:7].hex(), 
                             frame[7:8].hex(), frame[8:16].hex(), frame[16:].hex())
             await self._send_frame(frame)
             
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Waiting for time sync response...")
+            if _LOGGER.isEnabledFor(logging.DEBUG):
+                _LOGGER.debug("Waiting for time sync response...")
             response = await self._wait_for_response(0xB0, timeout=5.0)
             if response:
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Time sync response received: %s", response.hex())
+                if LOG_RAW_FRAMES:
+                    _LOGGER.debug("Time sync response received: %s", response.hex())
                 _LOGGER.info("Time sync completed successfully")
                 return True  # Time sync response received successfully
             else:

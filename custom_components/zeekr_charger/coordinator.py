@@ -82,7 +82,7 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # Query charger basic information (for serial, model, production date, etc.)
                 try:
                     basic_info = await self.client.query_charger_basic_info()
-                except Exception as e:
+                except Exception:
                     basic_info = {}
 
                 # Name the device after the model it reports (e.g. Raedian Neo)
@@ -127,10 +127,6 @@ class ZeekrChargerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             
             # Query home current configuration (for capacity info)
             current_config = await self.client.query_home_current_config()
-            if current_config:
-                pass  # current_config available
-            else:
-                pass  # no current_config
             
             # Query power status to get home limit and configured limit (fire and forget like auth demo)
             await self.client.query_power_status()  # Fire and forget - response handled by notification handler
