@@ -755,6 +755,50 @@ def parse_power_status(payload: bytes, tail: bytes = b"") -> PowerStatus:
     return PowerStatus(limit_amps=set_current_a, max_current_capacity=max_current_a, configured_limit_amps=set_current_a)
 
 
+def parse_home_current_config(payload: bytes, tail: bytes = b"") -> CurrentConfig:
+    """Parse the installation config response (0xA9).
+
+    Payload layouts seen on the wire:
+      * ``C0 <grid_a>``                      - short selector form
+      * ``8E <grid_a> <phase> <earth> <pv> <pv_phase>`` - status byte + 5 fields
+      * ``<grid_a> <phase> <earth> <pv> <pv_phase> ...`` - the 5 fields directly
+    ``tail[0]``, when present, is the currently configured limit in amps.
+    Anything shorter than 2 bytes (or unrecognised and shorter than 6) yields
+    an empty CurrentConfig.
+    """
+    configured_limit = tail[0] if tail else None
+    home_cfg_hex = payload.hex()
+
+    def full(fields: bytes) -> CurrentConfig:
+        grid, phase, earthing, solar_pv, solar_phase = fields[:5]
+        return CurrentConfig(
+            max_current_capacity_a=grid,
+            present_current_limit_a=configured_limit,
+            grid_capacity_a=grid,
+            home_cfg_hex=home_cfg_hex,
+            grid_phase=phase,
+            earthing_sys=earthing,
+            solar_pv=solar_pv,
+            solar_phase=solar_phase,
+        )
+
+    def grid_only(grid: int) -> CurrentConfig:
+        return CurrentConfig(
+            max_current_capacity_a=grid,
+            present_current_limit_a=configured_limit,
+            grid_capacity_a=grid,
+            home_cfg_hex=home_cfg_hex,
+        )
+
+    if len(payload) >= 2 and payload[0] == 0xC0:
+        return grid_only(payload[1])
+    if len(payload) >= 2 and payload[0] == 0x8E:
+        return full(payload[1:]) if len(payload) >= 6 else grid_only(payload[1])
+    if len(payload) >= 6:
+        return full(payload)
+    return CurrentConfig()
+
+
 def parse_tlv_response(payload: bytes) -> Dict[str, Any]:
     """Parse TLV (Type-Length-Value) response."""
     result = {}

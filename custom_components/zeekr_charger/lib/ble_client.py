@@ -34,6 +34,7 @@ from .protocol import (
     parse_frame,
     extract_token_from_response,
     parse_heartbeat_state,
+    parse_home_current_config,
     parse_power_status,
     parse_tlv_response,
     parse_b5_telemetry,
@@ -751,225 +752,28 @@ class ZeekrBleClient:
 
 
     async def query_home_current_config(self) -> Optional[CurrentConfig]:
-        """Query home current configuration using simple approach (like auth demo)."""
+        """Query the installation config (0xA9): grid capacity, phase, earthing, solar."""
         if not self._token:
             _LOGGER.warning("Cannot query home current config - no session token")
             return None
-        
+
         try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying home current config with simple approach...")
-            
-            # Try simple 0xA9 query first (like auth demo approach)
-            frame = pack_frame_request(0xA9, self._token, b"")
-            if VERBOSE_LOGGING:
-                _LOGGER.debug("Sending home current config frame: %s", frame.hex())
-                # Frame structure: SOF(1) + opcode(1) + header(5) + checksum(1) + token(8) + payload(variable)
-                _LOGGER.debug("Home current config frame breakdown: SOF=%s, opcode=%s, header=%s, checksum=%s, token=%s, payload=%s", 
-                            frame[:1].hex(), frame[1:2].hex(), frame[2:7].hex(), 
-                            frame[7:8].hex(), frame[8:16].hex(), frame[16:].hex())
-            await self._send_frame(frame)
-            
-            if VERBOSE_LOGGING:
-                _LOGGER.debug("Waiting for home current config response...")
+            await self._send_frame(pack_frame_request(0xA9, self._token, b""))
             response = await self._wait_for_response(0xA9, timeout=5.0)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Home current config response received: %s (type: %s)", response, type(response))
-            if response:
-                if isinstance(response, tuple):
-                    payload, tail = response
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Home current config response received: payload=%s, tail=%s", payload.hex(), tail.hex())
-                        _LOGGER.debug("Payload length: %d, Tail length: %d", len(payload), len(tail))
-                    
-                    # Parse the payload data like the dumper (0xA9 with 0xC0 selector)
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Parsing 0xA9 payload: length=%d, first_byte=0x%02X, payload=%s", 
-                                   len(payload), payload[0] if len(payload) > 0 else 0, payload.hex())
-                    if len(payload) >= 2 and payload[0] == 0xC0:
-                        # Decode like zeekr_dumper_pro.py: grid_capacity_a = p[1]
-                        _LOGGER.info("Taking 0xC0 parsing path")
-                        grid_capacity_a = payload[1]
-                        home_cfg_hex = payload.hex()
-                        
-                        configured_limit = tail[0] if tail else None
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Parsed home current config (0xA9): grid_capacity_a=%d, home_cfg_hex=%s, configured_limit=%s", 
-                                        grid_capacity_a, home_cfg_hex, 
-                                        f"{configured_limit}A" if configured_limit is not None else "None")
-                        return CurrentConfig(
-                            max_current_capacity_a=grid_capacity_a,
-                            present_current_limit_a=configured_limit,
-                            grid_capacity_a=grid_capacity_a,
-                            home_cfg_hex=home_cfg_hex,
-                        )
-                    elif len(payload) >= 6:
-                        # Handle direct format without 0xC0 selector: [grid_capacity][phase][earthing][solar_pv][solar_phase][extra]
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Taking direct format parsing path (no 0xC0 selector)")
-                        grid_capacity_a = payload[0]  # First byte is grid capacity
-                        grid_phase = payload[1]      # Second byte is grid phase
-                        earthing_sys = payload[2]    # Third byte is earthing system
-                        solar_pv = payload[3]        # Fourth byte is solar PV
-                        solar_phase = payload[4]     # Fifth byte is solar phase
-                        home_cfg_hex = payload.hex()
-                        
-                        configured_limit = tail[0] if tail else None
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Parsed home current config (direct format): grid_capacity=%d, grid_phase=%d, earthing_sys=%d, solar_pv=%d, solar_phase=%d, configured_limit=%s", 
-                                    grid_capacity_a, grid_phase, earthing_sys, solar_pv, solar_phase,
-                                    f"{configured_limit}A" if configured_limit is not None else "None")
-                        return CurrentConfig(
-                            max_current_capacity_a=grid_capacity_a,
-                            present_current_limit_a=configured_limit,
-                            grid_capacity_a=grid_capacity_a,
-                            home_cfg_hex=home_cfg_hex,
-                            grid_phase=grid_phase,
-                            earthing_sys=earthing_sys,
-                            solar_pv=solar_pv,
-                            solar_phase=solar_phase,
-                        )
-                    elif len(payload) >= 2 and payload[0] == 0x8E:
-                        # Handle 0x8E format (HA plugin specific): parse like Android app
-                        # Skip status byte (0x8E), then parse 5 fields as per smali analysis
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Taking 0x8E parsing path")
-                        if len(payload) >= 6:
-                            grid_capacity_a = payload[1]  # gridCapacity
-                            grid_phase = payload[2]      # gridPhase  
-                            earthing_sys = payload[3]    # earthingSys
-                            solar_pv = payload[4]        # solarPv
-                            solar_phase = payload[5]     # solarPhase
-                            home_cfg_hex = payload.hex()
-                            
-                            configured_limit = tail[0] if tail else None
-                            _LOGGER.info("Parsed home current config (0xA9, 0x8E format): grid_capacity=%d, grid_phase=%d, earthing_sys=%d, solar_pv=%d, solar_phase=%d, configured_limit=%s", 
-                                        grid_capacity_a, grid_phase, earthing_sys, solar_pv, solar_phase,
-                                        f"{configured_limit}A" if configured_limit is not None else "None")
-                            return CurrentConfig(
-                                max_current_capacity_a=grid_capacity_a,
-                                present_current_limit_a=configured_limit,
-                                grid_capacity_a=grid_capacity_a,
-                                home_cfg_hex=home_cfg_hex,
-                                grid_phase=grid_phase,
-                                earthing_sys=earthing_sys,
-                                solar_pv=solar_pv,
-                                solar_phase=solar_phase,
-                            )
-                        else:
-                            # Fallback for shorter payloads
-                            grid_capacity_a = payload[1]
-                            home_cfg_hex = payload.hex()
-                            configured_limit = tail[0] if tail else None
-                            _LOGGER.info("Parsed home current config (0xA9, 0x8E format, short): grid_capacity=%d, configured_limit=%s", 
-                                        grid_capacity_a, f"{configured_limit}A" if configured_limit is not None else "None")
-                            return CurrentConfig(
-                                max_current_capacity_a=grid_capacity_a,
-                                present_current_limit_a=configured_limit,
-                                grid_capacity_a=grid_capacity_a,
-                                home_cfg_hex=home_cfg_hex,
-                            )
-                    elif len(payload) >= 6:
-                        # Fallback to old parsing method for compatibility
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Taking fallback parsing path (old method)")
-                        grid_capacity = (payload[0] << 8) | payload[1]
-                        grid_phase = payload[2]
-                        earthing = payload[3]
-                        solar_pv = payload[4]
-                        solar_phase = payload[5] if len(payload) > 5 else 0
-                        
-                        configured_limit = tail[0] if tail else None
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Parsed home current config (fallback): grid_capacity=%d, phase=%d, earthing=%d, solar_pv=%d, solar_phase=%d, configured_limit=%s", 
-                                    grid_capacity, grid_phase, earthing, solar_pv, solar_phase, 
-                                    f"{configured_limit}A" if configured_limit is not None else "None")
-                        return CurrentConfig(
-                            max_current_capacity_a=grid_capacity,
-                            present_current_limit_a=configured_limit,
-                        )
-                    else:
-                        _LOGGER.warning("Home current config payload too short: %s (expected >= 6 bytes)", payload.hex())
-                        _LOGGER.warning("No parsing path matched - returning empty CurrentConfig")
-                        return CurrentConfig()
-                else:
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Home current config response received: %s", response.hex())
-                    
-                    # Parse the response data like the dumper (0xA9 with 0xC0 selector)
-                    if len(response) >= 2 and response[0] == 0xC0:
-                        # Decode like zeekr_dumper_pro.py: grid_capacity_a = p[1]
-                        grid_capacity_a = response[1]
-                        home_cfg_hex = response.hex()
-                        
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Parsed home current config (0xA9): grid_capacity_a=%d, home_cfg_hex=%s", 
-                                       grid_capacity_a, home_cfg_hex)
-                        return CurrentConfig(
-                            max_current_capacity_a=grid_capacity_a,
-                            present_current_limit_a=None,
-                            grid_capacity_a=grid_capacity_a,
-                            home_cfg_hex=home_cfg_hex,
-                        )
-                    elif len(response) >= 2 and response[0] == 0x8E:
-                        # Handle 0x8E format (HA plugin specific): parse like Android app
-                        if len(response) >= 6:
-                            grid_capacity_a = response[1]  # gridCapacity
-                            grid_phase = response[2]      # gridPhase  
-                            earthing_sys = response[3]    # earthingSys
-                            solar_pv = response[4]        # solarPv
-                            solar_phase = response[5]     # solarPhase
-                            home_cfg_hex = response.hex()
-                            
-                            if VERBOSE_LOGGING:
-                                _LOGGER.info("Parsed home current config (0xA9, 0x8E format): grid_capacity=%d, grid_phase=%d, earthing_sys=%d, solar_pv=%d, solar_phase=%d", 
-                                       grid_capacity_a, grid_phase, earthing_sys, solar_pv, solar_phase)
-                            return CurrentConfig(
-                                max_current_capacity_a=grid_capacity_a,
-                                present_current_limit_a=None,
-                                grid_capacity_a=grid_capacity_a,
-                                home_cfg_hex=home_cfg_hex,
-                                grid_phase=grid_phase,
-                                earthing_sys=earthing_sys,
-                                solar_pv=solar_pv,
-                                solar_phase=solar_phase,
-                            )
-                        else:
-                            # Fallback for shorter payloads
-                            grid_capacity_a = response[1]
-                            home_cfg_hex = response.hex()
-                            if VERBOSE_LOGGING:
-                                _LOGGER.info("Parsed home current config (0xA9, 0x8E format, short): grid_capacity=%d", grid_capacity_a)
-                            return CurrentConfig(
-                                max_current_capacity_a=grid_capacity_a,
-                                present_current_limit_a=None,
-                                grid_capacity_a=grid_capacity_a,
-                                home_cfg_hex=home_cfg_hex,
-                            )
-                    elif len(response) >= 6:
-                        # Fallback to old parsing method for compatibility
-                        grid_capacity = (response[0] << 8) | response[1]
-                        grid_phase = response[2]
-                        earthing = response[3]
-                        solar_pv = response[4]
-                        # response[5] might be solar_phase or other data
-                        
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("Parsed home current config (fallback): grid_capacity=%d, phase=%d, earthing=%d, solar_pv=%d", 
-                                   grid_capacity, grid_phase, earthing, solar_pv)
-                        return CurrentConfig(max_current_capacity_a=grid_capacity, present_current_limit_a=None)
-                    else:
-                        _LOGGER.warning("Home current config payload too short: %s (expected >= 2 bytes)", response.hex())
-                        return CurrentConfig()
-            else:
-                _LOGGER.warning("No home current config response received (timeout or no response)")
-                _LOGGER.warning("Response was: %s (type: %s)", response, type(response))
-                return None
         except Exception as exc:
             _LOGGER.error("Home current config query failed: %s", exc)
-            import traceback
-            _LOGGER.error("Full traceback: %s", traceback.format_exc())
             return None
+
+        if not response:
+            _LOGGER.warning("No home current config response received")
+            return None
+
+        # _process_frame resolves 0xA9 futures with (payload, tail)
+        payload, tail = response
+        config = parse_home_current_config(payload, tail)
+        if config.grid_capacity_a is None:
+            _LOGGER.warning("Unrecognised home current config payload: %s", payload.hex())
+        return config
 
     async def query_charger_basic_info(self) -> Optional[dict[str, Any]]:
         """Query charger basic information (0xC1) with 1-byte 0x01 payload."""
