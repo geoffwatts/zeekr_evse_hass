@@ -1,5 +1,6 @@
 """Snapshot every sensor entity's static attrs + values using stubbed HA modules.
-usage: snapshot.py <repo_root> > out.json
+usage: python tests/sensor_snapshot.py . > tests/sensor_snapshot.json
+(regenerate only for intentional entity changes)
 """
 import importlib, json, sys, types, enum, datetime
 from unittest.mock import MagicMock
