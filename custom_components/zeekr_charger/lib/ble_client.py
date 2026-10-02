@@ -165,67 +165,54 @@ class ZeekrBleClient:
         mac_pattern = r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$|^[0-9A-Fa-f]{12}$'
         return bool(re.match(mac_pattern, address))
 
+    async def _open_session(self, device_address: str) -> bool:
+        """Connect over BLE, enable notifications and authenticate.
+
+        Shared by the initial connect and by reconnection. On failure the BLE
+        link is left for the caller to clean up.
+        """
+        # Prefer the BLEDevice from HA's BLE stack (works through ESPHome proxies)
+        target = self._lookup_ble_device(device_address) or device_address
+        bleak_client = await establish_connection(
+            BleakClient,
+            target,
+            f"zeekr_charger_{self.serial}",
+            max_attempts=3,
+        )
+        # establish_connection returns a connected client or raises
+        if not bleak_client or not bleak_client.is_connected:
+            _LOGGER.error("Failed to connect to BLE device")
+            return False
+
+        log_connection(f"Connected to charger at {device_address}")
+        self._client = bleak_client
+
+        if hasattr(bleak_client, "exchange_mtu"):
+            try:
+                _LOGGER.debug("Negotiated MTU: %d", await bleak_client.exchange_mtu(517))
+            except Exception as exc:
+                _LOGGER.warning("MTU exchange failed: %s", exc)
+
+        await self._enable_notifications()
+        return await self._authenticate()
+
     async def async_connect(self) -> bool:
         """Connect to the charger."""
         try:
-            # First, try to discover the device if we don't have a proper MAC address
             device_address = await self._discover_device()
             if not device_address:
                 _LOGGER.error("Could not discover Zeekr charger device")
                 return False
 
-            _LOGGER.info("Found Zeekr charger at %s", device_address)
-            self._discovered_address = device_address  # Store for reconnection
-            
-            # Try to get the device from Home Assistant's BLE stack first
-            ha_device = self._lookup_ble_device(device_address)
-            if ha_device is not None:
-                _LOGGER.info("Using Home Assistant BLE device: %s", device_address)
-                bleak_client = await establish_connection(
-                    BleakClient,
-                    ha_device,
-                    f"zeekr_charger_{self.serial}",
-                    max_attempts=3,
-                )
-            else:
-                _LOGGER.info("Connecting directly to BLE address: %s", device_address)
-                bleak_client = await establish_connection(
-                    BleakClient,
-                    device_address,
-                    f"zeekr_charger_{self.serial}",
-                    max_attempts=3,
-                )
-            
-            # establish_connection returns a connected client or raises an exception
-            if not bleak_client or not bleak_client.is_connected:
-                _LOGGER.error("Failed to connect to BLE device")
-                return False
+            self._discovered_address = device_address  # Reused by reconnection
 
-            log_connection(f"Connected to charger at {device_address}")
-            self._client = bleak_client
-            
-            # Try to maximize MTU (only if the client supports it)
-            try:
-                if hasattr(self._client, 'exchange_mtu'):
-                    mtu = await self._client.exchange_mtu(517)
-                    _LOGGER.debug("Negotiated MTU: %d", mtu)
-                else:
-                    _LOGGER.debug("MTU exchange not supported by this BLE client")
-            except Exception as exc:
-                _LOGGER.warning("MTU exchange failed: %s", exc)
-
-            # Enable notifications
-            await self._enable_notifications()
-            
-            # Authenticate
-            if await self._authenticate():
+            if await self._open_session(device_address):
                 self._connected = True
-                # Start connection monitoring for automatic reconnection
                 await self._start_connection_monitor()
                 return True
-            else:
-                await self.async_disconnect()
-                return False
+
+            await self.async_disconnect()
+            return False
 
         except Exception as exc:
             _LOGGER.error("Connection failed: %s", exc)
@@ -355,8 +342,8 @@ class ZeekrBleClient:
         """Attempt to reconnect to the charger."""
         try:
             _LOGGER.info("Attempting to reconnect to charger...")
-            
-            # Clean up existing connection
+
+            # Drop the stale connection and session
             if self._client:
                 try:
                     if self._client.is_connected:
@@ -364,65 +351,23 @@ class ZeekrBleClient:
                 except Exception:
                     pass
                 self._client = None
-            
             self._connected = False
             self._token = None
-            
-            # Use the previously discovered address if available
+
             device_address = self._discovered_address or await self._discover_device()
             if not device_address:
                 _LOGGER.error("Could not discover device for reconnection")
                 return False
-            
-            # Store the discovered address for future reconnections
             self._discovered_address = device_address
-            
-            # Try to reconnect
-            ha_device = self._lookup_ble_device(device_address)
-            if ha_device is not None:
-                _LOGGER.info("Reconnecting using Home Assistant BLE device: %s", device_address)
-                bleak_client = await establish_connection(
-                    BleakClient,
-                    ha_device,
-                    f"zeekr_charger_{self.serial}",
-                    max_attempts=3,
-                )
-            else:
-                _LOGGER.info("Reconnecting directly to BLE address: %s", device_address)
-                bleak_client = await establish_connection(
-                    BleakClient,
-                    device_address,
-                    f"zeekr_charger_{self.serial}",
-                    max_attempts=3,
-                )
-            
-            if not bleak_client or not bleak_client.is_connected:
-                _LOGGER.error("Failed to establish BLE connection during reconnection")
-                return False
-            
-            _LOGGER.info("BLE connection re-established")
-            self._client = bleak_client
-            
-            # Try to maximize MTU
-            try:
-                if hasattr(self._client, 'exchange_mtu'):
-                    mtu = await self._client.exchange_mtu(517)
-                    _LOGGER.debug("Negotiated MTU: %d", mtu)
-            except Exception as exc:
-                _LOGGER.warning("MTU exchange failed during reconnection: %s", exc)
-            
-            # Re-enable notifications
-            await self._enable_notifications()
-            
-            # Re-authenticate
-            if await self._authenticate():
+
+            if await self._open_session(device_address):
                 self._connected = True
                 _LOGGER.info("Reconnection and re-authentication successful")
                 return True
-            else:
-                _LOGGER.error("Re-authentication failed during reconnection")
-                return False
-                
+
+            _LOGGER.error("Re-authentication failed during reconnection")
+            return False
+
         except Exception as exc:
             _LOGGER.error("Reconnection attempt failed: %s", exc)
             return False
@@ -659,6 +604,8 @@ class ZeekrBleClient:
                     await self._perform_initial_setup()
                     
                     return True
+                _LOGGER.error("Authentication failed: no token in response")
+                return False
             except asyncio.TimeoutError:
                 _LOGGER.error("Authentication timeout")
                 return False
