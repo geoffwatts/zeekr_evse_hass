@@ -34,7 +34,10 @@ from .protocol import (
     parse_frame,
     extract_token_from_response,
     parse_heartbeat_state,
+    parse_config_json,
     parse_home_current_config,
+    parse_network_status,
+    parse_wifi_status,
     parse_power_status,
     parse_tlv_response,
     parse_b5_telemetry,
@@ -775,206 +778,46 @@ class ZeekrBleClient:
             _LOGGER.warning("Unrecognised home current config payload: %s", payload.hex())
         return config
 
-    async def query_charger_basic_info(self) -> Optional[dict[str, Any]]:
-        """Query charger basic information (0xC1) with 1-byte 0x01 payload."""
-        if not self._token:
-            _LOGGER.warning("Cannot query charger basic info - no session token")
-            return None
-        
-        try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying charger basic info (0xC1) with 0x01 payload...")
-            
-            # Send C1 query with 1-byte 0x01 payload (configuration read - Android app style)
-            frame = pack_frame_request(0xC1, self._token, b"\x01")
-            await self._send_frame(frame)
-            
-            response = await self._wait_for_response(0xC1, timeout=5.0)
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Basic info query response: %s", response)
-            if response:
-                # Response is a tuple (payload, tail)
-                if isinstance(response, tuple):
-                    payload, tail = response
-                    # Combine payload and tail for complete JSON
-                    full_response = payload + (tail if tail else b"")
-                else:
-                    full_response = response
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Charger basic info response received: %d bytes", len(full_response))
-                
-                # Response format: First 1-2 bytes are status/type, then JSON
-                try:
-                    # Try to find JSON start by looking for '{' character
-                    json_start = -1
-                    for i, byte in enumerate(full_response):
-                        if byte == ord('{'):
-                            json_start = i
-                            break
-                    
-                    if json_start == -1:
-                        _LOGGER.warning("No JSON start found in basic info response: %s", full_response.hex())
-                        return {"raw_hex": full_response.hex()}
-                    
-                    json_bytes = full_response[json_start:]
-                    json_str = json_bytes.decode('utf-8')
-                    import json
-                    json_data = json.loads(json_str)
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Successfully parsed basic info JSON (started at byte %d): %s", json_start, json_data)
-                    
-                    # Convert from Android format [type_code, value] to just value
-                    normalized = {}
-                    for key, val in json_data.items():
-                        if isinstance(val, list) and len(val) == 2:
-                            # Extract value from [type_code, value] tuple
-                            normalized[key] = val[1]
-                        else:
-                            normalized[key] = val
-                    
-                    # Map field names to match expected format (similar to zeekr_dumper_pro.py)
-                    field_mappings = {
-                        "rated_power": "rated_power_w",
-                        "rate_charging_current": "rated_charging_current_a",
-                        "number_of_socket_outlets": "num_socket_outlets",
-                    }
-                    
-                    # Apply field mappings
-                    mapped_data = {}
-                    for key, value in normalized.items():
-                        mapped_key = field_mappings.get(key, key)
-                        mapped_data[mapped_key] = value
-                    
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Basic info mapped data: %s", mapped_data)
-                    return mapped_data
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    _LOGGER.warning("Failed to parse basic info as JSON: %s", e)
-                    if VERBOSE_LOGGING:
-                        _LOGGER.debug("Raw response: %s", full_response.hex())
-                    return {"raw_hex": full_response.hex()}
-            else:
-                _LOGGER.warning("No charger basic info response received (response was None)")
-        except Exception as exc:
-            _LOGGER.warning("Charger basic info query failed: %s", exc)
-        
-        return None
-
-    async def query_charger_protection_info(self) -> Optional[dict[str, Any]]:
-        """Query charger protection information (0xC4) with 1-byte 0x01 payload."""
-        return await self._query_config_json(0xC4, "protection info")
-    
-    
-    async def query_charger_wifi_config(self) -> Optional[dict[str, Any]]:
-        """Query charger WiFi configuration (0xC7) with 1-byte 0x01 payload."""
-        return await self._query_config_json(0xC7, "wifi config")
-    
-    
-    async def _query_config_json(self, opcode: int, description: str) -> Optional[dict[str, Any]]:
-        """Generic method to query configuration JSON responses (C1-C9)."""
+    async def _query_raw(self, opcode: int, description: str, payload: bytes = b"\x01") -> Optional[bytes]:
+        """Send a query and return the response body (payload + tail), or None."""
         if not self._token:
             _LOGGER.warning("Cannot query %s - no session token", description)
             return None
-        
+
         try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying charger %s (0x%02X) with 0x01 payload...", description, opcode)
-            
-            # Send query with 1-byte 0x01 payload (configuration read - Android app style)
-            frame = pack_frame_request(opcode, self._token, b"\x01")
-            await self._send_frame(frame)
-            
+            await self._send_frame(pack_frame_request(opcode, self._token, payload))
             response = await self._wait_for_response(opcode, timeout=5.0)
-            if response:
-                # Response is a tuple (payload, tail)
-                if isinstance(response, tuple):
-                    payload, tail = response
-                    # Combine payload and tail for complete JSON
-                    full_response = payload + (tail if tail else b"")
-                else:
-                    full_response = response
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.debug("Charger %s response received: %d bytes", description, len(full_response))
-                
-                # Response format: First 1-2 bytes are status/type, then JSON
-                try:
-                    # Try to find JSON start by looking for '{' character
-                    json_start = -1
-                    for i, byte in enumerate(full_response):
-                        if byte == ord('{'):
-                            json_start = i
-                            break
-                    
-                    if json_start == -1:
-                        _LOGGER.warning("No JSON start found in %s response: %s", description, full_response.hex())
-                        return {"raw_hex": full_response.hex()}
-                    
-                    json_bytes = full_response[json_start:]
-                    json_str = json_bytes.decode('utf-8')
-                    import json
-                    json_data = json.loads(json_str)
-                    _LOGGER.debug("Successfully parsed %s JSON (started at byte %d)", description, json_start)
-                    
-                    # Convert from Android format [type_code, value] to just value
-                    normalized = {}
-                    for key, val in json_data.items():
-                        if isinstance(val, list) and len(val) == 2:
-                            # Extract value from [type_code, value] tuple
-                            normalized[key] = val[1]
-                        else:
-                            normalized[key] = val
-                    
-                    # Map field names to match expected format (similar to zeekr_dumper_pro.py)
-                    field_mappings = {}
-                    if opcode == 0xC1:  # Basic info
-                        field_mappings = {
-                            "rated_power": "rated_power_w",
-                            "rate_charging_current": "rated_charging_current_a",
-                            "number_of_socket_outlets": "num_socket_outlets",
-                        }
-                    elif opcode == 0xC2:  # Employ info
-                        field_mappings = {
-                            "rate_charging_current": "rated_charging_current_a",
-                            "number_of_socket_outlets": "num_socket_outlets",
-                        }
-                    elif opcode == 0xC4:  # Protection info
-                        # No field mappings needed for protection info
-                        pass
-                    elif opcode == 0xC5:  # Socket config
-                        field_mappings = {
-                            "server_a_ip_address": "server_a_ip_address",
-                            "server_a_port": "server_a_port",
-                            "server_a_protocol": "server_a_protocol",
-                            "protocol_a_version": "protocol_a_version",
-                        }
-                    elif opcode == 0xC7:  # WiFi config
-                        field_mappings = {
-                            "wifi_function_enable": "wifi_function_enable",
-                            "wifi_mac_address": "wifi_mac_address",
-                            "wifi_module_firmware_version": "wifi_module_firmware_version",
-                        }
-                    
-                    # Apply field mappings
-                    mapped_data = {}
-                    for key, value in normalized.items():
-                        mapped_key = field_mappings.get(key, key)
-                        mapped_data[mapped_key] = value
-                    
-                    return mapped_data
-                except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                    _LOGGER.warning("Failed to parse %s as JSON: %s", description, e)
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("Raw response: %s", full_response.hex())
-                        _LOGGER.info("Raw response as string: %s", full_response.decode('utf-8', errors='ignore'))
-                    return {"raw_hex": full_response.hex()}
-            else:
-                _LOGGER.warning("No %s response received", description)
         except Exception as exc:
             _LOGGER.warning("%s query failed: %s", description, exc)
-        
-        return None
+            return None
+
+        if not response:
+            _LOGGER.warning("No %s response received", description)
+            return None
+
+        # Some opcodes resolve with (payload, tail), the rest with plain payload
+        if isinstance(response, tuple):
+            payload, tail = response
+            return payload + (tail or b"")
+        return response
+
+    async def _query_config_json(self, opcode: int, description: str) -> Optional[dict[str, Any]]:
+        """Query a configuration JSON response (0xC1-0xC9)."""
+        data = await self._query_raw(opcode, description)
+        if data is None:
+            return None
+        result = parse_config_json(opcode, data)
+        if "raw_hex" in result:
+            _LOGGER.warning("Could not parse %s response as JSON", description)
+        return result
+
+    async def query_charger_basic_info(self) -> Optional[dict[str, Any]]:
+        """Query charger basic information (0xC1)."""
+        return await self._query_config_json(0xC1, "basic info")
+
+    async def query_charger_protection_info(self) -> Optional[dict[str, Any]]:
+        """Query charger protection information (0xC4)."""
+        return await self._query_config_json(0xC4, "protection info")
 
     async def query_wifi_config(self) -> Optional[dict[str, Any]]:
         """Query WiFi configuration (0xC7)."""
@@ -982,200 +825,21 @@ class ZeekrBleClient:
 
     async def query_wifi_status(self) -> Optional[dict[str, Any]]:
         """Query WiFi status (0xE4) - binary format, not JSON."""
-        if not self._token:
-            _LOGGER.warning("Cannot query WiFi status - no session token")
+        data = await self._query_raw(0xE4, "WiFi status")
+        if data is None:
             return None
-        
-        try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying WiFi status (0xE4)...")
-            
-            # Send query with 1-byte 0x01 payload
-            frame = pack_frame_request(0xE4, self._token, b"\x01")
-            await self._send_frame(frame)
-            
-            response = await self._wait_for_response(0xE4, timeout=5.0)
-            if response:
-                # Response is a tuple (payload, tail)
-                if isinstance(response, tuple):
-                    payload, tail = response
-                    full_response = payload + (tail if tail else b"")
-                else:
-                    full_response = response
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("WiFi status response received: %d bytes", len(full_response))
-                
-                # Log the decoded content for debugging
-                if len(full_response) > 2:
-                    try:
-                        decoded_content = full_response[2:].decode('utf-8', errors='ignore')
-                    except Exception:
-                        pass
-                
-                # Parse 0xE4 response like the dumper does
-                # Structure: [response_type][format][ssid_data][newline][password_data]
-                result = {}
-                if len(full_response) >= 2:
-                    result["wifi_flag_hex"] = full_response[:2].hex()
-                    if len(full_response) > 2:
-                        result["wifi_extra_hex"] = full_response[2:].hex()
-                    
-                    # Map WiFi status codes to English descriptions
-                    wifi_status_codes = {
-                        0: "WiFi hardware switch not opened, startup failed",
-                        1: "WiFi module not supported, WiFi startup failed", 
-                        2: "WiFi module not found",
-                        3: "Invalid password, startup failed",
-                        4: "Invalid SSID, startup failed",
-                        5: "Unknown WiFi error, startup failed",
-                        6: "IP setting failed",
-                        7: "DHCP startup failed, WiFi startup failed",
-                        8: "Server problem",
-                        9: "Client problem"
-                    }
-                    
-                    # The first byte (0x8E/0xC0) is a response type identifier
-                    # The second byte (0x02) indicates successful data format
-                    # For now, we'll interpret 0x02 as "successful" since it contains SSID/password
-                    first_byte = full_response[0]
-                    second_byte = full_response[1] if len(full_response) > 1 else 0
-                    
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("WiFi status parsing: first_byte=0x%02X, second_byte=0x%02X", first_byte, second_byte)
-                    
-                    result["wifi_response_type"] = f"0x{first_byte:02X}"
-                    result["wifi_data_format"] = second_byte
-                    
-                    # If we have SSID/password data, consider it successful
-                    # Accept 0x01, 0x02, and 0x68 as valid format indicators
-                    # 0x68 appears to be a newer firmware format
-                    # Raedian firmware sends only the format byte before the SSID
-                    # (e.g. 02 'SSID' 0A 'password' 03), so also check the first byte
-                    valid_formats = (0x01, 0x02, 0x68)
-                    if second_byte in valid_formats or first_byte in valid_formats:
-                        result["wifi_status"] = "Connected"
-                        result["wifi_status_code"] = 0  # Success
-                    else:
-                        result["wifi_status"] = f"Unknown data format: 0x{second_byte:02X} (expected 0x01, 0x02, or 0x68)"
-                        result["wifi_status_code"] = second_byte
-                        # Don't log the response itself: it contains the WiFi password
-                        _LOGGER.warning("WiFi status received unknown data format: 0x%02X (response length: %d)",
-                                       second_byte, len(full_response))
-                
-                # Parse SSID and password if present
-                # Handle C0 02, 8E 02, and 0x68 formats
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("WiFi status parsing: length=%d", len(full_response))
-                if len(full_response) >= 2:
-                    if VERBOSE_LOGGING:
-                        _LOGGER.info("WiFi status: first_byte=0x%02X, second_byte=0x%02X", full_response[0], full_response[1])
-                    body = full_response[1:]
-                    try:
-                        s = body.decode('utf-8', errors='ignore')
-                        if VERBOSE_LOGGING:
-                            _LOGGER.info("WiFi status: decoded body length: %d", len(s))
-                        if '\n' in s:
-                            ssid, pwd = s.split('\n', 1)
-                            # Clean up the password (remove control characters)
-                            pwd = pwd.rstrip('\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f')
-                            if VERBOSE_LOGGING:
-                                _LOGGER.info("WiFi status: split result - ssid='%s', password=<%d chars>", ssid, len(pwd))
-                            # Only set SSID if we haven't already set it with the corrected value
-                            if "ssid" not in result and ssid:
-                                result["ssid"] = ssid
-                            # Only set password if we haven't already set it with the corrected value
-                            if "password" not in result and pwd:
-                                result["password"] = pwd
-                        else:
-                            if s:
-                                result["ssid_or_value"] = s
-                    except Exception as e:
-                        _LOGGER.warning("Failed to parse WiFi status ASCII: %s", e)
-                else:
-                    _LOGGER.warning("WiFi status: second byte 0x%02X not in expected formats (0x01, 0x02, 0x68)", 
-                                   full_response[1] if len(full_response) >= 2 else 0)
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Parsed WiFi status: %s", {k: ("<redacted>" if k in ("password", "wifi_extra_hex") else v) for k, v in result.items()})
-                return result
-            else:
-                _LOGGER.warning("No WiFi status response received")
-        except Exception as exc:
-            _LOGGER.error("WiFi status query failed: %s", exc)
-        
-        return None
+        result = parse_wifi_status(data)
+        if result.get("wifi_status", "").startswith("Unknown"):
+            # Log lengths only: the response contains the WiFi password
+            _LOGGER.warning("WiFi status received unknown data format (response length: %d)", len(data))
+        return result
 
     async def query_network_status(self) -> Optional[dict[str, Any]]:
-        """Query network status (0xD3) - CheckNetworkStatusResponse with error codes."""
-        if not self._token:
-            _LOGGER.warning("Cannot query network status - no session token")
+        """Query network status (0xD3) - error codes and networking mode."""
+        data = await self._query_raw(0xD3, "network status")
+        if data is None:
             return None
-        
-        try:
-            if VERBOSE_LOGGING:
-                _LOGGER.info("Querying network status (0xD3)...")
-            
-            # Send query with 1-byte 0x01 payload
-            frame = pack_frame_request(0xD3, self._token, b"\x01")
-            await self._send_frame(frame)
-            
-            response = await self._wait_for_response(0xD3, timeout=5.0)
-            if response:
-                # Response is a tuple (payload, tail)
-                if isinstance(response, tuple):
-                    payload, tail = response
-                    full_response = payload + (tail if tail else b"")
-                else:
-                    full_response = response
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Network status response received: %d bytes", len(full_response))
-                    _LOGGER.info("Network status raw response: %s", full_response.hex())
-                
-                # Parse 0xD3 response based on CheckNetworkStatusResponse.smali
-                result = {}
-                if len(full_response) >= 2:
-                    # First 2 bytes: network result
-                    result["network_result"] = int.from_bytes(full_response[0:2], "little")
-                
-                if len(full_response) >= 4:
-                    # Next 2 bytes: networking mode
-                    result["networking_mode"] = int.from_bytes(full_response[2:4], "little")
-                
-                if len(full_response) >= 8:
-                    # Next 4 bytes: result detail (the error code we want)
-                    result["result_detail"] = int.from_bytes(full_response[4:8], "little")
-                    
-                    # Map error codes to descriptions based on smali analysis
-                    error_descriptions = {
-                        0x200: "Success",
-                        0x400: "Client Problem", 
-                        0x500: "Server Problem",
-                        0x1401: "DHCP Startup Failed, WiFi Startup Failed",
-                        0x1502: "IP Setup Failed",
-                        0x5023: "Unknown WiFi Error, Startup Failed",
-                        0x1005: "SSID Invalid, Startup Failed",
-                        0x1006: "Password Invalid, Startup Failed",
-                        0x1001: "WiFi Module Not Found",
-                        0x1002: "WiFi Module Not Supported, WiFi Startup Failed", 
-                        0x1003: "WiFi Hardware Switch Not On, Startup Failed",
-                    }
-                    
-                    result["result_detail_desc"] = error_descriptions.get(
-                        result["result_detail"], 
-                        f"Unknown Error (0x{result['result_detail']:04X})"
-                    )
-                
-                if VERBOSE_LOGGING:
-                    _LOGGER.info("Parsed network status: %s", result)
-                return result
-            else:
-                _LOGGER.warning("No network status response received")
-        except Exception as exc:
-            _LOGGER.error("Network status query failed: %s", exc)
-        
-        return None
+        return parse_network_status(data)
 
 
     async def _perform_initial_setup(self) -> None:

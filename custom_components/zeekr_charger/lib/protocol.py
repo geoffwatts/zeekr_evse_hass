@@ -5,6 +5,7 @@ Only includes the methods and definitions actually needed.
 
 from __future__ import annotations
 
+import json
 import struct
 import time
 from dataclasses import dataclass
@@ -954,3 +955,117 @@ def _get_field_name(tag: int, value: str) -> str:
 def cmd_get_protection_info(token: bytes) -> bytes:
     """C4 protection info query V1 plaintext."""
     return pack_frame_request(0xC4, token)
+
+
+# ============== Config / status query responses ==============
+
+# Per-opcode renames applied to the JSON keys the charger reports
+CONFIG_JSON_FIELD_MAPS: Dict[int, Dict[str, str]] = {
+    0xC1: {  # basic info
+        "rated_power": "rated_power_w",
+        "rate_charging_current": "rated_charging_current_a",
+        "number_of_socket_outlets": "num_socket_outlets",
+    },
+    0xC2: {  # employ info
+        "rate_charging_current": "rated_charging_current_a",
+        "number_of_socket_outlets": "num_socket_outlets",
+    },
+}
+
+
+def parse_config_json(opcode: int, data: bytes) -> Dict[str, Any]:
+    """Parse a 0xC1-0xC9 configuration response (a few header bytes, then JSON).
+
+    The charger encodes values as ``[type_code, value]``; these are flattened to
+    ``value``. If no JSON can be decoded, ``{"raw_hex": ...}`` is returned.
+    """
+    json_start = data.find(b"{")
+    if json_start == -1:
+        return {"raw_hex": data.hex()}
+
+    try:
+        json_data = json.loads(data[json_start:].decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"raw_hex": data.hex()}
+
+    renames = CONFIG_JSON_FIELD_MAPS.get(opcode, {})
+    result: Dict[str, Any] = {}
+    for key, val in json_data.items():
+        if isinstance(val, list) and len(val) == 2:
+            val = val[1]
+        result[renames.get(key, key)] = val
+    return result
+
+
+_WIFI_VALID_FORMATS = (0x01, 0x02, 0x68)
+_PASSWORD_PADDING = bytes(range(0x10)).decode("latin-1")
+
+
+def parse_wifi_status(data: bytes) -> Dict[str, Any]:
+    """Parse the 0xE4 WiFi status response (binary, not JSON).
+
+    Layout: ``[type][format][ssid]\n[password]``. Zeekr firmware sends
+    ``C0/8E 02 ...``; Raedian sends only the format byte (``02 ssid 0A pwd 03``),
+    so the format is accepted in either of the first two bytes.
+    """
+    if len(data) < 2:
+        return {}
+
+    first, second = data[0], data[1]
+    result: Dict[str, Any] = {
+        "wifi_flag_hex": data[:2].hex(),
+        "wifi_response_type": f"0x{first:02X}",
+        "wifi_data_format": second,
+    }
+    if len(data) > 2:
+        result["wifi_extra_hex"] = data[2:].hex()
+
+    if second in _WIFI_VALID_FORMATS or first in _WIFI_VALID_FORMATS:
+        result["wifi_status"] = "Connected"
+        result["wifi_status_code"] = 0
+    else:
+        result["wifi_status"] = f"Unknown data format: 0x{second:02X} (expected 0x01, 0x02, or 0x68)"
+        result["wifi_status_code"] = second
+
+    text = data[1:].decode("utf-8", errors="ignore")
+    if "\n" in text:
+        ssid, pwd = text.split("\n", 1)
+        pwd = pwd.rstrip(_PASSWORD_PADDING)
+        if ssid:
+            result["ssid"] = ssid
+        if pwd:
+            result["password"] = pwd
+    elif text:
+        result["ssid_or_value"] = text
+    return result
+
+
+NETWORK_ERROR_DESCRIPTIONS = {
+    0x200: "Success",
+    0x400: "Client Problem",
+    0x500: "Server Problem",
+    0x1401: "DHCP Startup Failed, WiFi Startup Failed",
+    0x1502: "IP Setup Failed",
+    0x5023: "Unknown WiFi Error, Startup Failed",
+    0x1005: "SSID Invalid, Startup Failed",
+    0x1006: "Password Invalid, Startup Failed",
+    0x1001: "WiFi Module Not Found",
+    0x1002: "WiFi Module Not Supported, WiFi Startup Failed",
+    0x1003: "WiFi Hardware Switch Not On, Startup Failed",
+}
+
+
+def parse_network_status(data: bytes) -> Dict[str, Any]:
+    """Parse the 0xD3 network status response (little-endian u16, u16, u32)."""
+    result: Dict[str, Any] = {}
+    if len(data) >= 2:
+        result["network_result"] = int.from_bytes(data[0:2], "little")
+    if len(data) >= 4:
+        result["networking_mode"] = int.from_bytes(data[2:4], "little")
+    if len(data) >= 8:
+        detail = int.from_bytes(data[4:8], "little")
+        result["result_detail"] = detail
+        result["result_detail_desc"] = NETWORK_ERROR_DESCRIPTIONS.get(
+            detail, f"Unknown Error (0x{detail:04X})"
+        )
+    return result
