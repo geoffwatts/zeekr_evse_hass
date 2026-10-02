@@ -134,8 +134,14 @@ def chunks(frame: bytes):
         yield frame[i : i + CHUNK_SIZE]
 
 
-async def find_address_type(client, address: int, timeout: float) -> int:
-    """Listen for the charger's advertisement to learn its BLE address type."""
+async def find_address_type(client, address: int, timeout: float):
+    """Listen for the charger's advertisement to learn its BLE address type.
+
+    Returns (address_type, unsubscribe). The subscription must stay open for the
+    whole session: an ESPHome proxy sends BLE connection responses only to the one
+    API client that holds the advertisement subscription, so unsubscribing here
+    would make the later connect time out.
+    """
     found: asyncio.Future = asyncio.get_running_loop().create_future()
 
     def on_adv(resp):
@@ -145,9 +151,10 @@ async def find_address_type(client, address: int, timeout: float) -> int:
 
     unsub = client.subscribe_bluetooth_le_raw_advertisements(on_adv)
     try:
-        return await asyncio.wait_for(found, timeout)
-    finally:
+        return await asyncio.wait_for(found, timeout), unsub
+    except asyncio.TimeoutError:
         unsub()
+        raise
 
 
 def find_char(services, uuid: str):
@@ -173,11 +180,15 @@ async def run(args) -> None:
     # normally holds that, so the scan may see nothing; fall back to --address-type.
     print(f"Looking for {args.mac} advertising (up to {args.scan_timeout:.0f}s)...")
     try:
-        address_type = await find_address_type(client, address, args.scan_timeout)
+        address_type, unsubscribe_adverts = await find_address_type(client, address, args.scan_timeout)
         print(f"Seen advertising, address type {address_type}")
     except asyncio.TimeoutError:
-        address_type = args.address_type
-        print(f"Not seen (Home Assistant likely owns the advert subscription); assuming address type {address_type}")
+        raise SystemExit(
+            "Charger not seen advertising. Most likely another API client (Home Assistant's "
+            "ESPHome integration) owns this proxy's Bluetooth subscription, so no adverts or "
+            "connection responses reach us. Disable that ESPHome device/entry in Home "
+            "Assistant (or its Bluetooth proxy) while the listener runs."
+        )
 
     connected: asyncio.Future = asyncio.get_running_loop().create_future()
 
@@ -237,6 +248,7 @@ async def run(args) -> None:
             await send(protocol.cmd_heartbeat(dumper.token), "heartbeat")
             await asyncio.sleep(args.interval)
     finally:
+        unsubscribe_adverts()
         out.close()
         print("\nB5 payload lengths seen:", dict(dumper.b5_lengths))
         try:
@@ -257,7 +269,6 @@ def parse_args(argv=None):
     p.add_argument("--station-id", type=int, default=88888)
     p.add_argument("--interval", type=float, default=3.0, help="seconds between heartbeats")
     p.add_argument("--scan-timeout", type=float, default=8.0)
-    p.add_argument("--address-type", type=int, default=0, help="BLE address type if not seen advertising: 0 public, 1 random")
     p.add_argument("--duration", type=float, default=0, help="stop after this many seconds (default: run until Ctrl-C)")
     p.add_argument("--authorize", action="store_true", help="also send the authorize-charge command once")
     p.add_argument("--out", help="JSONL output path")
