@@ -705,12 +705,9 @@ def parse_heartbeat_state(payload: bytes, last_heartbeat_time: float = 0.0) -> H
         if len(payload) >= 2:
             state_info.port = payload[1]
 
-    if state_info.temperature_c is None:
-        if len(payload) > 31:
-            state_info.temperature_c = payload[31]
-        elif len(payload) > 19:
-            state_info.temperature_c = payload[19]
-
+    # Temperature only comes from full telemetry frames (set above). Other B5
+    # payloads (limit snapshots, unknown lengths) have no temperature field, so
+    # guessing a byte there injects bogus readings.
     return state_info
 
 

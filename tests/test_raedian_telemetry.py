@@ -150,3 +150,18 @@ def test_stale_telemetry_zeroes_live_values_only():
     assert result["voltage_v"] == 223.5 and result["temperature_c"] == 37
     # The input is not modified
     assert frozen["power_w"] == 3214
+
+
+def test_heartbeat_temperature_only_from_telemetry_frames():
+    # 33-byte Raedian frame: byte 32 is the temperature
+    raedian = bytes.fromhex(CAPTURED[0][0])
+    assert protocol.parse_heartbeat_state(raedian).temperature_c == 33
+
+    # A B5 payload that isn't a telemetry frame must not yield a temperature,
+    # even though it is longer than 19 bytes (byte 19 / 31 are not temperatures)
+    odd = bytes(range(1, 26))
+    assert len(odd) not in protocol.TELEMETRY_LENGTHS
+    assert protocol.parse_heartbeat_state(odd).temperature_c is None
+
+    # Idle 2-byte heartbeat seen in the vendor-app logs
+    assert protocol.parse_heartbeat_state(bytes.fromhex("0001")).temperature_c is None
