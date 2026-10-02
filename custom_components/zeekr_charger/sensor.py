@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
@@ -16,13 +23,214 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
 from .device import build_device_info
 
+DIAGNOSTIC = EntityCategory.DIAGNOSTIC
+
+
+# ---- value helpers -------------------------------------------------------
+
+def _float(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _int(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _enabled(value: Any) -> str | None:
+    """Protection flags are reported as 1 (on) / 0 (off)."""
+    if value is None:
+        return None
+    return "Enabled" if value == 1 else "Disabled"
+
+
+def _kilowatts(watts: Any) -> float | None:
+    return float(watts) / 1000.0 if watts is not None else None
+
+
+def _production_date(value: Any) -> date | None:
+    """Production date is reported as e.g. "2024/8/14"."""
+    if not value:
+        return None
+    try:
+        year, month, day = (int(part) for part in str(value).split("/"))
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _phase_status(phase_flags: Any) -> str | None:
+    if phase_flags is None:
+        return None
+    # Lower bits are per-phase flags; chargers sometimes add higher-order
+    # status bits, so only count the active phase bits.
+    active_bits = phase_flags & 0x07
+    if active_bits == 0 or (active_bits & (active_bits - 1) == 0):
+        return "Single Phase"
+    return f"Multi Phase (flags: 0x{phase_flags:02X})"
+
+
+def _first_version_string(basic_info: dict[str, Any]) -> str | None:
+    for key, value in basic_info.items():
+        if any(term in key.lower() for term in ("version", "firmware", "ver")) and isinstance(value, str):
+            return value
+    return None
+
+
+def _software_version(basic_info: dict[str, Any]) -> str | None:
+    for field in ("c_board_software_version", "software_version", "firmware_version"):
+        if field in basic_info:
+            return basic_info[field]
+    return None
+
+
+def _rated_capacity(data: dict[str, Any]) -> float | None:
+    """Prefer the 0xE0 power status; fall back to the 0xA9 installation config."""
+    for section, key in (("power_status", "max_current_capacity"), ("current_config", "max_current_capacity_a")):
+        value = data.get(section, {}).get(key)
+        if value is not None and value > 0:
+            return float(value)
+    return None
+
+
+def _charge_rate(data: dict[str, Any]) -> float | None:
+    """The configured limit when set, otherwise the home limit."""
+    power_status = data.get("power_status", {})
+    configured = power_status.get("configured_limit_amps")
+    if configured is not None and configured > 0:
+        return float(configured)
+    return _float(power_status.get("limit_amps"))
+
+
+def _temperature(data: dict[str, Any]) -> float | None:
+    temp = data.get("heartbeat_state", {}).get("temperature_c")
+    if temp is None:
+        temp = data.get("telemetry", {}).get("temperature_c")
+    return _float(temp)
+
+
+def _charger_state(coordinator, data: dict[str, Any]) -> str:
+    # Only report a charger state while the BLE link is actually up
+    if not coordinator.get_connection_status().get("connected"):
+        return "disconnected"
+    return data.get("heartbeat_state", {}).get("state", "unknown")
+
+
+def _field(section: str, key: str, convert: Callable[[Any], Any] = lambda v: v) -> Callable[[dict], Any]:
+    """Build a value_fn reading ``data[section][key]`` through ``convert``."""
+    return lambda data: convert(data.get(section, {}).get(key))
+
+
+# ---- description-driven sensors ------------------------------------------
+
+@dataclass(frozen=True, kw_only=True)
+class ZeekrSensorDescription(SensorEntityDescription):
+    """Describes a sensor whose value is a pure function of coordinator data."""
+
+    value_fn: Callable[[dict[str, Any]], Any]
+    # unique_id suffix; kept identical to the pre-refactor class-name based ids
+    # so existing entities are not orphaned
+    legacy_id: str
+
+
+def _desc(legacy_id: str, name: str, value_fn, **kw) -> ZeekrSensorDescription:
+    return ZeekrSensorDescription(key=legacy_id, legacy_id=legacy_id, name=name, value_fn=value_fn, **kw)
+
+
+_A = UnitOfElectricCurrent.AMPERE
+_V = UnitOfElectricPotential.VOLT
+_W = UnitOfPower.WATT
+MEASUREMENT = SensorStateClass.MEASUREMENT
+
+SENSORS: tuple[ZeekrSensorDescription, ...] = (
+    _desc("zeekrchargercurrentlimitsensor", "Charge Rate", _charge_rate,
+          native_unit_of_measurement=_A, device_class=SensorDeviceClass.CURRENT, icon="mdi:lightning-bolt"),
+    _desc("zeekrchargermaxcurrentcapacitysensor", "Rated Current Capacity", _rated_capacity,
+          native_unit_of_measurement=_A, device_class=SensorDeviceClass.CURRENT,
+          icon="mdi:lightning-bolt-outline", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerserialsensor", "Serial Number", _field("basic_info", "charge_point_number"),
+          icon="mdi:identifier", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerversionsensor", "Firmware Version", lambda d: _first_version_string(d.get("basic_info", {})),
+          icon="mdi:chip", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargersoftwareversionsensor", "Software Version", lambda d: _software_version(d.get("basic_info", {})),
+          icon="mdi:chip", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerproductiondatesensor", "Production Date", _field("basic_info", "production_date", _production_date),
+          device_class=SensorDeviceClass.DATE, icon="mdi:calendar", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerratedpowersensor", "Rated Power", _field("basic_info", "rated_power_w", _kilowatts),
+          native_unit_of_measurement=UnitOfPower.KILO_WATT, device_class=SensorDeviceClass.POWER,
+          state_class=MEASUREMENT, icon="mdi:flash", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargermodelsensor", "Model", _field("basic_info", "model_number"),
+          icon="mdi:ev-station", entity_category=DIAGNOSTIC),
+    # Safety sensors
+    _desc("zeekrchargergroundingdetectionsensor", "Grounding Detection",
+          _field("protection_info", "grounding_detection", _enabled), icon="mdi:earth", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerrelayadhesionsensor", "Relay Adhesion Detection",
+          _field("protection_info", "relay_adhesion_detection", _enabled), icon="mdi:connection", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerimpropergunlinesensor", "Improper Cable Detection",
+          _field("protection_info", "detection_of_improper_gun_line", _enabled), icon="mdi:alert-circle",
+          entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerrcddetectionsensor", "RCD Detection",
+          _field("protection_info", "rcd_detection", _enabled), icon="mdi:shield-check", entity_category=DIAGNOSTIC),
+    # Network
+    _desc("zeekrchargerwifissidsensor", "WiFi SSID",
+          _field("wifi_status", "ssid", lambda v: str(v) if v else None), icon="mdi:wifi", entity_category=DIAGNOSTIC),
+    # Energy / telemetry
+    _desc("zeekrchargersessionenergysensor", "Session Energy", _field("telemetry", "session_energy_kwh", _float),
+          native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR, device_class=SensorDeviceClass.ENERGY,
+          state_class=SensorStateClass.TOTAL_INCREASING, icon="mdi:lightning-bolt"),
+    _desc("zeekrchargervoltagesensor", "Voltage", _field("telemetry", "voltage_v", _float),
+          native_unit_of_measurement=_V, device_class=SensorDeviceClass.VOLTAGE, state_class=MEASUREMENT,
+          icon="mdi:lightning-bolt", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargercurrentsensor", "In-use Current", _field("telemetry", "current_a", _float),
+          native_unit_of_measurement=_A, device_class=SensorDeviceClass.CURRENT, state_class=MEASUREMENT,
+          icon="mdi:current-ac"),
+    _desc("zeekrchargerpowersensor", "Charging Power", _field("telemetry", "power_w", _float),
+          native_unit_of_measurement=_W, device_class=SensorDeviceClass.POWER, state_class=MEASUREMENT,
+          icon="mdi:flash"),
+    _desc("zeekrchargertemperaturesensor", "Charger Temperature", _temperature,
+          native_unit_of_measurement=UnitOfTemperature.CELSIUS, state_class=MEASUREMENT,
+          device_class=SensorDeviceClass.TEMPERATURE, icon="mdi:thermometer", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargersessionruntimesensor", "Session Runtime", _field("telemetry", "session_runtime_seconds", _int),
+          native_unit_of_measurement=UnitOfTime.SECONDS, device_class=SensorDeviceClass.DURATION,
+          state_class=SensorStateClass.TOTAL_INCREASING, icon="mdi:timer", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargerphasestatussensor", "Phase Status", _field("telemetry", "phase_flags", _phase_status),
+          icon="mdi:sine-wave", entity_category=DIAGNOSTIC),
+    _desc("zeekrchargergridcapacitysensor", "Grid Capacity", _field("current_config", "grid_capacity_a", _float),
+          native_unit_of_measurement=_A, device_class=SensorDeviceClass.CURRENT, state_class=MEASUREMENT,
+          icon="mdi:transmission-tower", entity_category=DIAGNOSTIC),
+)
+
+# Per-phase telemetry (L1-L3): (legacy class id, name, telemetry key, unit, device class, icon, category)
+_PHASE_KINDS = (
+    ("zeekrchargerphasevoltagesensor", "Voltage L{p}", "voltage_l{p}_v", _V, SensorDeviceClass.VOLTAGE,
+     "mdi:sine-wave", DIAGNOSTIC),
+    ("zeekrchargerphasecurrentsensor", "Current L{p}", "current_l{p}_a", _A, SensorDeviceClass.CURRENT,
+     "mdi:current-ac", None),
+    ("zeekrchargerphasepowersensor", "Charging Power L{p}", "power_l{p}_w", _W, SensorDeviceClass.POWER,
+     "mdi:flash", None),
+)
+
+PHASE_SENSORS: tuple[ZeekrSensorDescription, ...] = tuple(
+    ZeekrSensorDescription(
+        key=f"{legacy_id}_l{phase}",
+        legacy_id=f"{legacy_id}_l{phase}",
+        name=name.format(p=phase),
+        value_fn=_field("telemetry", key.format(p=phase), _float),
+        native_unit_of_measurement=unit,
+        device_class=device_class,
+        state_class=MEASUREMENT,
+        icon=icon,
+        entity_category=category,
+    )
+    for legacy_id, name, key, unit, device_class, icon, category in _PHASE_KINDS
+    for phase in (1, 2, 3)
+)
 
 
 async def async_setup_entry(
@@ -33,351 +241,61 @@ async def async_setup_entry(
     """Set up Zeekr charger sensors from a config entry."""
     coordinator = hass.data[DOMAIN][config_entry.entry_id].coordinator
 
-    entities = [
-        ZeekrChargerCurrentLimitSensor(coordinator),
-        ZeekrChargerMaxCurrentCapacitySensor(coordinator),
+    entities: list[SensorEntity] = [
+        ZeekrChargerSensor(coordinator, description) for description in (*SENSORS, *PHASE_SENSORS)
+    ]
+    entities += [
         ZeekrChargerStateSensor(coordinator),
-        ZeekrChargerSerialSensor(coordinator),
-        ZeekrChargerVersionSensor(coordinator),
-        ZeekrChargerSoftwareVersionSensor(coordinator),
-        ZeekrChargerProductionDateSensor(coordinator),
-        ZeekrChargerRatedPowerSensor(coordinator),
-        ZeekrChargerModelSensor(coordinator),
-        # Removed manufacturer sensor - not needed
-        # Safety sensors
-        ZeekrChargerGroundingDetectionSensor(coordinator),
-        ZeekrChargerRelayAdhesionSensor(coordinator),
-        ZeekrChargerImproperGunLineSensor(coordinator),
-        ZeekrChargerRcdDetectionSensor(coordinator),
-        # Network sensors
-        # Energy sensors
-        ZeekrChargerSessionEnergySensor(coordinator),
-        ZeekrChargerVoltageSensor(coordinator),
-        ZeekrChargerCurrentSensor(coordinator),
-        ZeekrChargerPowerSensor(coordinator),
-        *(
-            sensor_class(coordinator, phase)
-            for sensor_class in (
-                ZeekrChargerPhaseVoltageSensor,
-                ZeekrChargerPhaseCurrentSensor,
-                ZeekrChargerPhasePowerSensor,
-            )
-            for phase in (1, 2, 3)
-        ),
-        ZeekrChargerTemperatureSensor(coordinator),
-        ZeekrChargerSessionRuntimeSensor(coordinator),
-        ZeekrChargerPhaseStatusSensor(coordinator),
-        ZeekrChargerGridCapacitySensor(coordinator),
-        ZeekrChargerWifiSsidSensor(coordinator),
         ZeekrChargerWifiStatusSensor(coordinator),
         ZeekrChargerConnectionStatusSensor(coordinator),
         ZeekrChargerReconnectAttemptsSensor(coordinator),
         ZeekrChargerChargeModeSensor(coordinator),
     ]
-
     async_add_entities(entities)
 
 
-class ZeekrChargerSensor(CoordinatorEntity, SensorEntity):
-    """Base class for Zeekr charger sensors."""
+class ZeekrChargerBaseSensor(CoordinatorEntity, SensorEntity):
+    """Common setup for all Zeekr charger sensors."""
+
+    _legacy_id: str
 
     def __init__(self, coordinator) -> None:
-        """Initialize the sensor."""
         super().__init__(coordinator)
         self._attr_device_info = build_device_info(coordinator)
-        self._attr_unique_id = f"{coordinator.client.serial}_{self.__class__.__name__.lower()}"
+        self._attr_unique_id = f"{coordinator.client.serial}_{self._legacy_id}"
 
 
-class ZeekrChargerCurrentLimitSensor(ZeekrChargerSensor):
-    """Sensor for current charge rate (charging limit)."""
+class ZeekrChargerSensor(ZeekrChargerBaseSensor):
+    """A sensor driven by a ZeekrSensorDescription."""
 
-    _attr_name = "Charge Rate"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
+    entity_description: ZeekrSensorDescription
 
-    _attr_icon = "mdi:lightning-bolt"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current charge rate in amperes."""
-        power_status = self.coordinator.data.get("power_status", {})
-        # Show configured limit if available, otherwise show home limit
-        configured_limit = power_status.get("configured_limit_amps")
-        if configured_limit is not None and configured_limit > 0:
-            return float(configured_limit)
-        
-        # Fallback to home limit if no configured limit
-        limit_amps = power_status.get("limit_amps")
-        if limit_amps is not None:
-            return float(limit_amps)
-        return None
-
-
-class ZeekrChargerMaxCurrentCapacitySensor(ZeekrChargerSensor):
-    """Sensor for rated current capacity."""
-
-    _attr_name = "Rated Current Capacity"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_icon = "mdi:lightning-bolt-outline"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    def __init__(self, coordinator, description: ZeekrSensorDescription) -> None:
+        self._legacy_id = description.legacy_id
+        super().__init__(coordinator)
+        self.entity_description = description
 
     @property
-    def native_value(self) -> float | None:
-        """Return the maximum current capacity in amperes."""
-        # Prefer power_status (from 0xE0 query) as it's more reliable
-        power_status = self.coordinator.data.get("power_status", {})
-        max_capacity = power_status.get("max_current_capacity")
-        if max_capacity is not None and max_capacity > 0:
-            return float(max_capacity)
-        
-        # Fallback to current_config (from 0xA9 query)  
-        current_config = self.coordinator.data.get("current_config", {})
-        max_capacity = current_config.get("max_current_capacity_a")
-        if max_capacity is not None and max_capacity > 0:
-            return float(max_capacity)
-        
-        return None
+    def native_value(self):
+        return self.entity_description.value_fn(self.coordinator.data)
 
 
-
-
-
-
-class ZeekrChargerSerialSensor(ZeekrChargerSensor):
-    """Sensor for charger serial number."""
-
-    _attr_name = "Serial Number"
-    _attr_icon = "mdi:identifier"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the charger serial number."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        # The serial number is stored in charge_point_number field
-        return basic_info.get("charge_point_number")
-
-
-class ZeekrChargerVersionSensor(ZeekrChargerSensor):
-    """Sensor for charger firmware version."""
-
-    _attr_name = "Firmware Version"
-    _attr_icon = "mdi:chip"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the firmware version."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        # Look for version in various field formats
-        for key, value in basic_info.items():
-            if any(term in key.lower() for term in ["version", "firmware", "ver"]) and isinstance(value, str):
-                return value
-        return None
-
-
-class ZeekrChargerStateSensor(ZeekrChargerSensor):
+class ZeekrChargerStateSensor(ZeekrChargerBaseSensor):
     """Sensor for charger state."""
 
+    _legacy_id = "zeekrchargerstatesensor"
     _attr_name = "Charger State"
     _attr_icon = "mdi:ev-station"
 
-
     @property
     def native_value(self) -> str | None:
-        """Return the charger state."""
-        # Check if Bluetooth is connected - only show charger state when actually connected
-        connection_status = self.coordinator.get_connection_status()
-        if not connection_status.get("connected"):
-            return "disconnected"
-        
-        heartbeat_state = self.coordinator.data.get("heartbeat_state", {})
-        return heartbeat_state.get("state", "unknown")
+        return _charger_state(self.coordinator, self.coordinator.data)
 
 
-class ZeekrChargerSoftwareVersionSensor(ZeekrChargerSensor):
-    """Sensor for charger software version."""
-
-    _attr_name = "Software Version"
-    _attr_icon = "mdi:chip"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the software version."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        # Try different possible field names
-        for field in ["c_board_software_version", "software_version", "firmware_version"]:
-            if field in basic_info:
-                return basic_info[field]
-        return None
-
-
-class ZeekrChargerProductionDateSensor(ZeekrChargerSensor):
-    """Sensor for charger production date."""
-
-    _attr_name = "Production Date"
-    _attr_device_class = SensorDeviceClass.DATE
-    _attr_icon = "mdi:calendar"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> date | None:
-        """Return the production date (reported as e.g. "2024/8/14")."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        production_date = basic_info.get("production_date")
-        if not production_date:
-            return None
-        try:
-            year, month, day = (int(part) for part in str(production_date).split("/"))
-            return date(year, month, day)
-        except ValueError:
-            return None
-
-
-class ZeekrChargerRatedPowerSensor(ZeekrChargerSensor):
-    """Sensor for rated power."""
-
-    _attr_name = "Rated Power"
-    _attr_native_unit_of_measurement = UnitOfPower.KILO_WATT
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:flash"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the rated power in kilowatts."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        rated_power = basic_info.get("rated_power_w")
-        if rated_power is not None:
-            # Convert watts to kilowatts
-            return float(rated_power) / 1000.0
-        return None
-
-
-class ZeekrChargerModelSensor(ZeekrChargerSensor):
-    """Sensor for charger model."""
-
-    _attr_name = "Model"
-    _attr_icon = "mdi:ev-station"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the charger model."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        model_number = basic_info.get("model_number")
-        return model_number
-
-
-class ZeekrChargerManufacturerSensor(ZeekrChargerSensor):
-    """Sensor for charger manufacturer."""
-
-    _attr_name = "Manufacturer"
-    _attr_icon = "mdi:factory"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the charger manufacturer."""
-        basic_info = self.coordinator.data.get("basic_info", {})
-        return basic_info.get("manufacturer")
-
-
-# Safety Sensors
-class ZeekrChargerGroundingDetectionSensor(ZeekrChargerSensor):
-    """Sensor for grounding detection status."""
-
-    _attr_name = "Grounding Detection"
-    _attr_icon = "mdi:earth"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the grounding detection status."""
-        protection_info = self.coordinator.data.get("protection_info", {})
-        grounding = protection_info.get("grounding_detection")
-        if grounding is not None:
-            return "Enabled" if grounding == 1 else "Disabled"
-        return None
-
-
-class ZeekrChargerRelayAdhesionSensor(ZeekrChargerSensor):
-    """Sensor for relay adhesion detection status."""
-
-    _attr_name = "Relay Adhesion Detection"
-    _attr_icon = "mdi:connection"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the relay adhesion detection status."""
-        protection_info = self.coordinator.data.get("protection_info", {})
-        relay = protection_info.get("relay_adhesion_detection")
-        if relay is not None:
-            return "Enabled" if relay == 1 else "Disabled"
-        return None
-
-
-class ZeekrChargerImproperGunLineSensor(ZeekrChargerSensor):
-    """Sensor for improper gun line detection status."""
-
-    _attr_name = "Improper Cable Detection"
-    _attr_icon = "mdi:alert-circle"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the improper gun line detection status."""
-        protection_info = self.coordinator.data.get("protection_info", {})
-        gun_line = protection_info.get("detection_of_improper_gun_line")
-        if gun_line is not None:
-            return "Enabled" if gun_line == 1 else "Disabled"
-        return None
-
-
-class ZeekrChargerRcdDetectionSensor(ZeekrChargerSensor):
-    """Sensor for RCD detection status."""
-
-    _attr_name = "RCD Detection"
-    _attr_icon = "mdi:shield-check"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the RCD detection status."""
-        protection_info = self.coordinator.data.get("protection_info", {})
-        rcd = protection_info.get("rcd_detection")
-        if rcd is not None:
-            return "Enabled" if rcd == 1 else "Disabled"
-        return None
-
-
-# Network Sensors
-
-
-class ZeekrChargerWifiSsidSensor(ZeekrChargerSensor):
-    """Sensor for WiFi SSID."""
-
-    _attr_name = "WiFi SSID"
-    _attr_icon = "mdi:wifi"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the WiFi SSID."""
-        # Check WiFi status (0xE4 response) for SSID
-        wifi_status = self.coordinator.data.get("wifi_status", {})
-        ssid = wifi_status.get("ssid")
-        if ssid:
-            return str(ssid)
-        return None
-
-
-class ZeekrChargerWifiStatusSensor(ZeekrChargerSensor):
+class ZeekrChargerWifiStatusSensor(ZeekrChargerBaseSensor):
     """Sensor for WiFi status with error code mapping based on Android app E4 logic."""
+
+    _legacy_id = "zeekrchargerwifistatussensor"
 
     _attr_name = "WiFi Status"
     _attr_icon = "mdi:wifi-settings"
@@ -440,233 +358,10 @@ class ZeekrChargerWifiStatusSensor(ZeekrChargerSensor):
         return "Unknown"
 
 
-
-
-# Energy Sensors
-class ZeekrChargerSessionEnergySensor(ZeekrChargerSensor):
-    """Sensor for energy consumed in current session."""
-
-    _attr_name = "Session Energy"
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_icon = "mdi:lightning-bolt"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the session energy in kWh."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        session_energy = telemetry.get("session_energy_kwh")
-        if session_energy is not None:
-            return float(session_energy)
-        return None
-
-
-class ZeekrChargerVoltageSensor(ZeekrChargerSensor):
-    """Sensor for line voltage."""
-
-    _attr_name = "Voltage"
-    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
-    _attr_device_class = SensorDeviceClass.VOLTAGE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:lightning-bolt"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the line voltage in volts."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        voltage = telemetry.get("voltage_v")
-        if voltage is not None:
-            return float(voltage)
-        return None
-
-
-class ZeekrChargerCurrentSensor(ZeekrChargerSensor):
-    """Sensor for charging current."""
-
-    _attr_name = "In-use Current"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:current-ac"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the charging current in amperes."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        current = telemetry.get("current_a")
-        if current is not None:
-            return float(current)
-        return None
-
-
-class ZeekrChargerPowerSensor(ZeekrChargerSensor):
-    """Sensor for total charging power (sum of the phases, voltage x current)."""
-
-    _attr_name = "Charging Power"
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:flash"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the total charging power in watts."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        power = telemetry.get("power_w")
-        if power is not None:
-            return float(power)
-        return None
-
-
-class ZeekrChargerPhaseSensor(ZeekrChargerSensor):
-    """Base class for a per-phase telemetry value (L1, L2 or L3)."""
-
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _name_template: str
-    _telemetry_key_template: str
-
-    def __init__(self, coordinator, phase: int) -> None:
-        """Initialize the sensor for phase 1, 2 or 3."""
-        super().__init__(coordinator)
-        self._phase = phase
-        self._attr_name = self._name_template.format(phase=phase)
-        self._attr_unique_id = f"{self._attr_unique_id}_l{phase}"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the value for this phase."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        value = telemetry.get(self._telemetry_key_template.format(phase=self._phase))
-        if value is not None:
-            return float(value)
-        return None
-
-
-class ZeekrChargerPhaseVoltageSensor(ZeekrChargerPhaseSensor):
-    """Sensor for the voltage on one phase."""
-
-    _name_template = "Voltage L{phase}"
-    _telemetry_key_template = "voltage_l{phase}_v"
-    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
-    _attr_device_class = SensorDeviceClass.VOLTAGE
-    _attr_icon = "mdi:sine-wave"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-
-class ZeekrChargerPhaseCurrentSensor(ZeekrChargerPhaseSensor):
-    """Sensor for the charging current on one phase."""
-
-    _name_template = "Current L{phase}"
-    _telemetry_key_template = "current_l{phase}_a"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_icon = "mdi:current-ac"
-
-
-class ZeekrChargerPhasePowerSensor(ZeekrChargerPhaseSensor):
-    """Sensor for charging power on one phase (voltage x current)."""
-
-    _name_template = "Charging Power L{phase}"
-    _telemetry_key_template = "power_l{phase}_w"
-    _attr_native_unit_of_measurement = UnitOfPower.WATT
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_icon = "mdi:flash"
-
-
-class ZeekrChargerTemperatureSensor(ZeekrChargerSensor):
-    """Sensor for charger temperature from heartbeat telemetry."""
-
-    _attr_name = "Charger Temperature"
-    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_icon = "mdi:thermometer"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the internal charger temperature in Celsius."""
-        heartbeat_state = self.coordinator.data.get("heartbeat_state", {})
-        telemetry = self.coordinator.data.get("telemetry", {})
-
-        temp = heartbeat_state.get("temperature_c")
-        if temp is None:
-            temp = telemetry.get("temperature_c")
-
-        return float(temp) if temp is not None else None
-
-
-class ZeekrChargerSessionRuntimeSensor(ZeekrChargerSensor):
-    """Sensor for session runtime duration."""
-
-    _attr_name = "Session Runtime"
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_icon = "mdi:timer"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> int | None:
-        """Return the session runtime in seconds."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        runtime = telemetry.get("session_runtime_seconds")
-        if runtime is not None:
-            return int(runtime)
-        return None
-
-
-class ZeekrChargerPhaseStatusSensor(ZeekrChargerSensor):
-    """Sensor for phase status flags."""
-
-    _attr_name = "Phase Status"
-    _attr_icon = "mdi:sine-wave"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the phase status."""
-        telemetry = self.coordinator.data.get("telemetry", {})
-        phase_flags = telemetry.get("phase_flags")
-        if phase_flags is not None:
-            # Treat lower bits as per-phase flags; chargers sometimes add
-            # higher-order status bits, so only count active phase bits.
-            active_bits = phase_flags & 0x07
-            if active_bits == 0 or (active_bits & (active_bits - 1) == 0):
-                return "Single Phase"
-            return f"Multi Phase (flags: 0x{phase_flags:02X})"
-        return None
-
-
-class ZeekrChargerGridCapacitySensor(ZeekrChargerSensor):
-    """Sensor for grid capacity (from 0xA9 home current config query)."""
-
-    _attr_name = "Grid Capacity"
-    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
-    _attr_device_class = SensorDeviceClass.CURRENT
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:transmission-tower"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    
-    def __init__(self, coordinator) -> None:
-        """Initialize the grid capacity sensor."""
-        super().__init__(coordinator)
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the grid capacity in amperes."""
-        current_config = self.coordinator.data.get("current_config", {})
-        grid_capacity = current_config.get("grid_capacity_a")
-        if grid_capacity is not None:
-            result = float(grid_capacity)
-            return result
-        return None
-
-
-class ZeekrChargerConnectionStatusSensor(ZeekrChargerSensor):
+class ZeekrChargerConnectionStatusSensor(ZeekrChargerBaseSensor):
     """Sensor for BLE connection status."""
+
+    _legacy_id = "zeekrchargerconnectionstatussensor"
 
     _attr_name = "Connection Status"
     _attr_icon = "mdi:bluetooth"
@@ -699,8 +394,10 @@ class ZeekrChargerConnectionStatusSensor(ZeekrChargerSensor):
         }
 
 
-class ZeekrChargerReconnectAttemptsSensor(ZeekrChargerSensor):
+class ZeekrChargerReconnectAttemptsSensor(ZeekrChargerBaseSensor):
     """Sensor for reconnection attempts count."""
+
+    _legacy_id = "zeekrchargerreconnectattemptssensor"
 
     _attr_name = "Reconnect Attempts"
     _attr_icon = "mdi:bluetooth-connect"
@@ -724,8 +421,10 @@ class ZeekrChargerReconnectAttemptsSensor(ZeekrChargerSensor):
         }
 
 
-class ZeekrChargerChargeModeSensor(ZeekrChargerSensor):
+class ZeekrChargerChargeModeSensor(ZeekrChargerBaseSensor):
     """Sensor for current charge mode setting."""
+
+    _legacy_id = "zeekrchargerchargemodesensor"
 
     _attr_name = "Charge Mode"
     _attr_icon = "mdi:ev-station"

@@ -1,0 +1,738 @@
+{
+ "empty": {
+  "SN123_zeekrchargerchargemodesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Charge Mode",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": {
+    "is_authorized_mode": false,
+    "is_auto_mode": false,
+    "raw_mode": null
+   },
+   "value": null
+  },
+  "SN123_zeekrchargerconnectionstatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:bluetooth",
+   "_attr_name": "Connection Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": {
+    "discovered_address": "AA",
+    "has_token": true,
+    "heartbeat_count": 7,
+    "last_heartbeat_time": 5,
+    "max_reconnect_attempts": 10,
+    "reconnect_attempts": 2,
+    "should_reconnect": true
+   },
+   "value": "Connected"
+  },
+  "SN123_zeekrchargercurrentlimitsensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Charge Rate",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargercurrentsensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "In-use Current",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargergridcapacitysensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:transmission-tower",
+   "_attr_name": "Grid Capacity",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargergroundingdetectionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:earth",
+   "_attr_name": "Grounding Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerimpropergunlinesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:alert-circle",
+   "_attr_name": "Improper Cable Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargermaxcurrentcapacitysensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:lightning-bolt-outline",
+   "_attr_name": "Rated Current Capacity",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargermodelsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Model",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l1": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L1",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l2": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L2",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l3": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L3",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasepowersensor_l1": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L1",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasepowersensor_l2": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L2",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasepowersensor_l3": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L3",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasestatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Phase Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l1": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L1",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l2": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L2",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l3": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L3",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerpowersensor": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerproductiondatesensor": {
+   "_attr_device_class": "DATE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:calendar",
+   "_attr_name": "Production Date",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerratedpowersensor": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Rated Power",
+   "_attr_native_unit_of_measurement": "kW",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerrcddetectionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:shield-check",
+   "_attr_name": "RCD Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerreconnectattemptssensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:bluetooth-connect",
+   "_attr_name": "Reconnect Attempts",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": {
+    "connected": true,
+    "max_reconnect_attempts": 10,
+    "should_reconnect": true
+   },
+   "value": 2
+  },
+  "SN123_zeekrchargerrelayadhesionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:connection",
+   "_attr_name": "Relay Adhesion Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerserialsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:identifier",
+   "_attr_name": "Serial Number",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargersessionenergysensor": {
+   "_attr_device_class": "ENERGY",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Session Energy",
+   "_attr_native_unit_of_measurement": "kWh",
+   "_attr_state_class": "TOTAL_INCREASING",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargersessionruntimesensor": {
+   "_attr_device_class": "DURATION",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:timer",
+   "_attr_name": "Session Runtime",
+   "_attr_native_unit_of_measurement": "s",
+   "_attr_state_class": "TOTAL_INCREASING",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargersoftwareversionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:chip",
+   "_attr_name": "Software Version",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerstatesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Charger State",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "unknown"
+  },
+  "SN123_zeekrchargertemperaturesensor": {
+   "_attr_device_class": "TEMPERATURE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:thermometer",
+   "_attr_name": "Charger Temperature",
+   "_attr_native_unit_of_measurement": "C",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerversionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:chip",
+   "_attr_name": "Firmware Version",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargervoltagesensor": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Voltage",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerwifissidsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:wifi",
+   "_attr_name": "WiFi SSID",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": null
+  },
+  "SN123_zeekrchargerwifistatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:wifi-settings",
+   "_attr_name": "WiFi Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Unknown"
+  }
+ },
+ "full": {
+  "SN123_zeekrchargerchargemodesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Charge Mode",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": {
+    "is_authorized_mode": false,
+    "is_auto_mode": false,
+    "raw_mode": 5
+   },
+   "value": "Solar Only"
+  },
+  "SN123_zeekrchargerconnectionstatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:bluetooth",
+   "_attr_name": "Connection Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": {
+    "discovered_address": "AA",
+    "has_token": true,
+    "heartbeat_count": 7,
+    "last_heartbeat_time": 5,
+    "max_reconnect_attempts": 10,
+    "reconnect_attempts": 2,
+    "should_reconnect": true
+   },
+   "value": "Connected"
+  },
+  "SN123_zeekrchargercurrentlimitsensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Charge Rate",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": 16.0
+  },
+  "SN123_zeekrchargercurrentsensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "In-use Current",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 14.4
+  },
+  "SN123_zeekrchargergridcapacitysensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:transmission-tower",
+   "_attr_name": "Grid Capacity",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 40.0
+  },
+  "SN123_zeekrchargergroundingdetectionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:earth",
+   "_attr_name": "Grounding Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Enabled"
+  },
+  "SN123_zeekrchargerimpropergunlinesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:alert-circle",
+   "_attr_name": "Improper Cable Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Enabled"
+  },
+  "SN123_zeekrchargermaxcurrentcapacitysensor": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:lightning-bolt-outline",
+   "_attr_name": "Rated Current Capacity",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": 32.0
+  },
+  "SN123_zeekrchargermodelsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Model",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Neo"
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l1": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L1",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 1.0
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l2": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L2",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 2.0
+  },
+  "SN123_zeekrchargerphasecurrentsensor_l3": {
+   "_attr_device_class": "CURRENT",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:current-ac",
+   "_attr_name": "Current L3",
+   "_attr_native_unit_of_measurement": "A",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 3.0
+  },
+  "SN123_zeekrchargerphasepowersensor_l1": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L1",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 100.0
+  },
+  "SN123_zeekrchargerphasepowersensor_l2": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L2",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 200.0
+  },
+  "SN123_zeekrchargerphasepowersensor_l3": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power L3",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 300.0
+  },
+  "SN123_zeekrchargerphasestatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Phase Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Multi Phase (flags: 0x07)"
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l1": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L1",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 230.0
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l2": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L2",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 231.0
+  },
+  "SN123_zeekrchargerphasevoltagesensor_l3": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:sine-wave",
+   "_attr_name": "Voltage L3",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 232.0
+  },
+  "SN123_zeekrchargerpowersensor": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Charging Power",
+   "_attr_native_unit_of_measurement": "W",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 3300.0
+  },
+  "SN123_zeekrchargerproductiondatesensor": {
+   "_attr_device_class": "DATE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:calendar",
+   "_attr_name": "Production Date",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "2024-08-14"
+  },
+  "SN123_zeekrchargerratedpowersensor": {
+   "_attr_device_class": "POWER",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:flash",
+   "_attr_name": "Rated Power",
+   "_attr_native_unit_of_measurement": "kW",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 7.4
+  },
+  "SN123_zeekrchargerrcddetectionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:shield-check",
+   "_attr_name": "RCD Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Disabled"
+  },
+  "SN123_zeekrchargerreconnectattemptssensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:bluetooth-connect",
+   "_attr_name": "Reconnect Attempts",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": {
+    "connected": true,
+    "max_reconnect_attempts": 10,
+    "should_reconnect": true
+   },
+   "value": 2
+  },
+  "SN123_zeekrchargerrelayadhesionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:connection",
+   "_attr_name": "Relay Adhesion Detection",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Disabled"
+  },
+  "SN123_zeekrchargerserialsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:identifier",
+   "_attr_name": "Serial Number",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "SN123"
+  },
+  "SN123_zeekrchargersessionenergysensor": {
+   "_attr_device_class": "ENERGY",
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Session Energy",
+   "_attr_native_unit_of_measurement": "kWh",
+   "_attr_state_class": "TOTAL_INCREASING",
+   "attrs": null,
+   "value": 1.5
+  },
+  "SN123_zeekrchargersessionruntimesensor": {
+   "_attr_device_class": "DURATION",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:timer",
+   "_attr_name": "Session Runtime",
+   "_attr_native_unit_of_measurement": "s",
+   "_attr_state_class": "TOTAL_INCREASING",
+   "attrs": null,
+   "value": 120
+  },
+  "SN123_zeekrchargersoftwareversionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:chip",
+   "_attr_name": "Software Version",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "1.2.3"
+  },
+  "SN123_zeekrchargerstatesensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": null,
+   "_attr_icon": "mdi:ev-station",
+   "_attr_name": "Charger State",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "charging"
+  },
+  "SN123_zeekrchargertemperaturesensor": {
+   "_attr_device_class": "TEMPERATURE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:thermometer",
+   "_attr_name": "Charger Temperature",
+   "_attr_native_unit_of_measurement": "C",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 31.0
+  },
+  "SN123_zeekrchargerversionsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:chip",
+   "_attr_name": "Firmware Version",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "1.2.3"
+  },
+  "SN123_zeekrchargervoltagesensor": {
+   "_attr_device_class": "VOLTAGE",
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:lightning-bolt",
+   "_attr_name": "Voltage",
+   "_attr_native_unit_of_measurement": "V",
+   "_attr_state_class": "MEASUREMENT",
+   "attrs": null,
+   "value": 230.1
+  },
+  "SN123_zeekrchargerwifissidsensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:wifi",
+   "_attr_name": "WiFi SSID",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Net"
+  },
+  "SN123_zeekrchargerwifistatussensor": {
+   "_attr_device_class": null,
+   "_attr_entity_category": "DIAGNOSTIC",
+   "_attr_icon": "mdi:wifi-settings",
+   "_attr_name": "WiFi Status",
+   "_attr_native_unit_of_measurement": null,
+   "_attr_state_class": null,
+   "attrs": null,
+   "value": "Password Invalid, Startup Failed"
+  }
+ }
+}
